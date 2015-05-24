@@ -44,60 +44,66 @@ module.exports =
         app.use(bodyParser.json());
         app.use(bodyParser.urlencoded({ extended: true }));
 
-        app.use(express.static(__dirname + '/static'));
-
-        app.set('views', __dirname + '/views');
-        app.set('view engine', 'hjs');
-
-        // Helper events
-        event.on('render', function(req, res, options)
+        if(config.static)
         {
-            var defaults =
+            app.use(express.static(config.static));
+        }
+
+        if(config.views)
+        {
+            app.set('views', config.views);
+            app.set('view engine', 'hjs');
+        
+            // Helper events
+            event.on('render', function(req, res, options)
             {
-                session: req.session,
-                partials:
+                var defaults =
                 {
-                    head: 'partials/head',
-                    header: 'partials/header',
-                    foot: 'partials/foot'
+                    session: req.session,
+                    partials:
+                    {
+                        head: 'partials/head',
+                        header: 'partials/header',
+                        foot: 'partials/foot'
+                    }
+                };
+
+                // Deep combine our defaults with the requested options
+                options = extend(true, defaults, options);
+                res.render(options.view, options);
+            });
+
+            // Special handler for messages
+            event.on('message', function(req, res, message)
+            {
+                message = (message || {type: ''});
+                message.type = message.type.toLowerCase();
+                
+                if(message.type == 'success')
+                {
+                    message.class = 'success';
+                    message.label = (message.label || 'Success!');
                 }
-            };
+                else if(message.type == 'error')
+                {
+                    message.class = 'danger';
+                    message.label = (message.label || 'Error:');
+                }
+                else
+                {
+                    message.class = 'info';
+                }
 
-            // Deep combine our defaults with the requested options
-            options = extend(true, defaults, options);
-            res.render(options.view, options);
-        });
-
-        // Special handler for messages
-        event.on('message', function(req, res, message)
-        {
-            message = (message || {type: ''});
-            message.type = message.type.toLowerCase();
-            
-            if(message.type == 'success')
-            {
-                message.class = 'success';
-                message.label = (message.label || 'Success!');
-            }
-            else if(message.type == 'error')
-            {
-                message.class = 'danger';
-                message.label = (message.label || 'Error:');
-            }
-            else
-            {
-                message.class = 'info';
-            }
-
-            var options =
-            {
-                view: 'message',
-                message: message
-            }
-            
-            event.emit('render', req, res, options);
-        });
-
+                var options =
+                {
+                    view: 'message',
+                    message: message
+                }
+                
+                event.emit('render', req, res, options);
+            });
+        }
+        
         var server =
         {
             app: app,

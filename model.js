@@ -41,7 +41,6 @@ var model =
         
         // MySQL connection
         model.mysql = mysql.createConnection(options);
-
         model.mysql.connect();
     },
 
