@@ -1,6 +1,6 @@
 {
   "name": "wetfish-server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "Rachel Fish <rachel@wetfish.net> (https://wetfish.net)",
   "description": "A simple framework for creating web servers",
   "main": "server.js",
