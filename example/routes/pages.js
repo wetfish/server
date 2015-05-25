@@ -7,7 +7,7 @@ module.exports = function(server)
 
     app.get('/', function(req, res)
     {
-        event.emit('render', req, res, {view: 'index'});
+        event.emit('render', req, res, {view: 'index', hello: 'world'});
     });
 
     app.get('/example', function(req, res)
