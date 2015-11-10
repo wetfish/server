@@ -1,0 +1,21 @@
+{
+  "name": "wetfish-server-example",
+  "version": "0.0.0",
+  "author": "Rachel Fish <rachel@wetfish.net> (https://wetfish.net)",
+  "description": "A simple example for creating web servers",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wetfish/server.git"
+  },
+  "keywords": [
+    "wetfish",
+    "server"
+  ],
+  "bugs": {
+    "url": "https://github.com/wetfish/server/issues"
+  },
+  "homepage": "https://github.com/wetfish/server#readme",
+  "dependencies": {
+    "wetfish-server": "^0.2.0"
+  }
+}

@@ -1,44 +1,42 @@
-/*
- * options
- *
- * mysql config
- * redis config
- * server port
- * static folder location?
- * views folder location?
- * 
- */
-
 module.exports =
 {
     createServer: function(config)
     {
+        // Primary express dependencies
         var express = require('express');
         var app = express();
         var http = require('http').createServer(app);
-        var session = require('express-session');
-        var RedisStore = require('connect-redis')(session);
         var bodyParser = require('body-parser');
 
+        // Event related dependences
         var extend = require('extend');
         var events = require('events');
         var event = new events.EventEmitter();
 
-        var model = require('./model');
-
-        // Connect to Redis and MySQL
-        model.connect(config);
-
+        // Start express web server
         http.listen(config.port);
         console.log("wetfish server started");
 
-        // Only enable sessions when redis is configured
-        if(model.redis)
+        var model = require('./model');
+
+        // Connect to Redis and MySQL if configured
+        model.connect(config);
+
+        // Set up session if configured
+        if(config.session)
         {
-            app.use(session({
-                store: new RedisStore({client: model.redis}),
-                secret: config.session.secret
-            }));
+            var session = require('express-session');
+
+            // Do we want to use redis for sessions?
+            if(config.session.driver == 'redis')
+            {
+                var RedisStore = require('connect-redis')(session);
+
+                app.use(session({
+                    store: new RedisStore({client: model.redis}),
+                    secret: config.session.secret
+                }));
+            }
         }
         
         app.use(bodyParser.json());

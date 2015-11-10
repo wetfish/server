@@ -22,13 +22,15 @@
   "homepage": "https://github.com/wetfish/server#readme",
   "dependencies": {
     "body-parser": "^1.12.4",
-    "connect-redis": "^2.3.0",
     "express": "^4.12.4",
-    "express-session": "^1.11.2",
     "extend": "^2.0.1",
-    "hjs": "0.0.6",
+    "hjs": "0.0.6"
+  },
+  "availableDependencies": {
+    "connect-redis": "^2.3.0",
+    "express-session": "^1.11.2",
     "mysql": "^2.6.2",
     "redis": "^0.12.1",
-    "wetfish-login": "git://github.com/wetfish/login"
+    "wetfish-login": "^0.1.0"
   }
 }

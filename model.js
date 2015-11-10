@@ -1,5 +1,4 @@
-var redis = require('redis');
-var mysql = require('mysql');
+var redis, mysql;
 
 var model =
 {
@@ -10,11 +9,13 @@ var model =
 
         if(config.redis)
         {
+            redis = require('redis');
             model.connect_redis(config);
         }
 
         if(config.mysql)
         {
+            mysql = require('mysql');
             model.connect_mysql(config);
         }
     },
