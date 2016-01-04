@@ -7,7 +7,15 @@ module.exports =
     static: __dirname + '/../public',
 
     // Path to views
-    views: __dirname + '/views'
+    views: __dirname + '/views',
+
+    // SSL configuration
+    ssl:
+    {
+        enabled: false,
+        key: 'path/to/private.key',
+        cert: 'path/to/cert'
+    }
 
     /*
     Before enabling the following options, you'll need to install the required dependencies

@@ -3,10 +3,22 @@ module.exports =
     createServer: function(config)
     {
         // Primary express dependencies
+        var fs = require('fs');
         var express = require('express');
         var app = express();
         var http = require('http').createServer(app);
         var bodyParser = require('body-parser');
+
+        if(config.ssl.enabled)
+        {
+            var ssl =
+            {
+                key: fs.readFileSync(config.ssl.key),
+                cert: fs.readFileSync(config.ssl.cert)
+            };
+
+            http = require('https').createServer(ssl, app);
+        }
 
         // Event related dependences
         var extend = require('extend');
