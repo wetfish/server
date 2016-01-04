@@ -4,7 +4,7 @@ module.exports =
     port: 1337,
 
     // Path to static files
-    static: __dirname + '/static',
+    static: __dirname + '/../public',
 
     // Path to views
     views: __dirname + '/views'
