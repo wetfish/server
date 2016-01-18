@@ -20,6 +20,11 @@ module.exports =
             http = require('https').createServer(ssl, app);
         }
 
+        if(config.sockets.enabled)
+        {
+            var io = require('socket.io')(server);
+        }
+
         // Event related dependences
         var extend = require('extend');
         var events = require('events');
@@ -121,6 +126,11 @@ module.exports =
             event: event,
             model: model
         };
+
+        if(config.sockets.enabled)
+        {
+            server.io = io;
+        }
 
         return server;
     }
