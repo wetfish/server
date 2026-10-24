@@ -4,7 +4,7 @@ Runs many independent websites on one small, inexpensive server, and deploys eac
 
 **Status:** the shared HTTPS proxy and webhook listener are in place. Server setup, project deploys, shared databases, and backups come next; see the [Roadmap](#roadmap).
 
-> This repository previously held a small Node.js web framework (2015–2016). That code is preserved in the `v0.2.0` tag.
+> This repository previously held a small Node.js web framework (2015–2016). That code is preserved, under its original GPL-3.0 license, in the `v0.2.0` tag.
 
 ## Why We Built This
 
@@ -63,6 +63,10 @@ Caddy is the only container listening on ports 80 and 443. It obtains and renews
 
 Staging runs the same setup on a separate server, so updates are tested in a production-like environment before they go live, at the cost of one more small server.
 
+### MIT license
+
+This repository is MIT licensed, so its scripts and configuration can be copied into, or adapted for, projects under any license, including the partner organizations' projects that share our servers.
+
 ## How It Works
 
 Each server runs two shared services from this repository's `docker-compose.yml`:
@@ -120,4 +124,4 @@ Still to come, in this order:
 
 ## License
 
-GPL-3.0; see `LICENSE`.
+MIT; see `LICENSE`.
