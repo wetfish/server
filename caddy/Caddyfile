@@ -1,0 +1,26 @@
+# Shared reverse proxy for every project on this server.
+#
+# Caddy obtains and renews HTTPS certificates automatically and redirects
+# HTTP to HTTPS. A certificate can only be issued once a domain's DNS points
+# at this server; until then Caddy keeps retrying in the background, and the
+# other domains are unaffected.
+
+# The server's own hostname (SERVER_HOSTNAME in the root .env): receives the
+# GitHub push webhooks for every project. Kept out of search results.
+{$SERVER_HOSTNAME} {
+	header X-Robots-Tag "noindex, nofollow"
+
+	# GitHub push webhooks; see webhook/
+	handle /hooks/* {
+		reverse_proxy shared-webhook:9000
+	}
+
+	# A plain response for checking that the server is up
+	handle {
+		respond "OK" 200
+	}
+}
+
+# One file per project, written when the project is added. Matching no files
+# is not an error, so a server with no projects starts normally.
+import /etc/caddy-sites/*.Caddyfile

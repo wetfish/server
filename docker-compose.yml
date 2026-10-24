@@ -1,0 +1,60 @@
+# Shared services that run once per server, in front of every project on it.
+# Settings come from the root .env; copy it from .env.example.
+#
+# Projects run from their own clones with their own docker-compose.yml. A
+# project's web server joins the `web` network so Caddy can reach it; nothing
+# else is published on the host.
+#
+# Containers here are named shared-<service>, and a project's containers are
+# named after the project, so `docker ps` shows which containers serve every
+# project and which belong to one.
+
+# Fixed project name, so volumes are named shared_<volume> wherever the clone
+# lives
+name: shared
+
+services:
+  # Terminates HTTPS on ports 80 and 443 for the server's own hostname and
+  # every project's domains, obtaining and renewing certificates
+  # automatically. The project sites are imported from state/sites/.
+  caddy:
+    image: caddy:2
+    container_name: shared-caddy
+    restart: unless-stopped
+    environment:
+      SERVER_HOSTNAME: ${SERVER_HOSTNAME:?set SERVER_HOSTNAME in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./caddy:/etc/caddy:ro
+      - ./state/sites:/etc/caddy-sites:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - web
+
+  # Receives GitHub push webhooks at /hooks/<project>, each project with its
+  # own secret. A signed push to the branch this server deploys writes the
+  # project's trigger file in state/triggers/. It has no Docker access.
+  webhook:
+    build:
+      context: ./webhook
+    container_name: shared-webhook
+    restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./state/webhook:/hooks:ro
+      - ./state/triggers:/triggers
+    networks:
+      - web
+
+networks:
+  # Fixed name, so project compose files can join it as an external network
+  web:
+    name: web
+
+volumes:
+  caddy_data:
+  caddy_config:
