@@ -1,0 +1,14 @@
+# Checks Cloudflare's published address ranges once a week, so a range
+# Cloudflare adds is never blocked for long. A failed download keeps the
+# current ranges. Installed by `cloudflare.sh enable`.
+
+[Unit]
+Description=Weekly update of Cloudflare's address ranges
+
+[Timer]
+OnCalendar=weekly
+RandomizedDelaySec=1d
+Persistent=true
+
+[Install]
+WantedBy=timers.target

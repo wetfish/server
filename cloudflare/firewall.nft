@@ -1,0 +1,76 @@
+# Cloudflare-only mode: web traffic to this server is accepted only from
+# Cloudflare's proxies, so the sites cannot be reached directly by the
+# server's IP address and scans of it find nothing on ports 80 and 443.
+#
+# Template: `cloudflare.sh` fills in Cloudflare's current address ranges
+# and the allowlist, installs the result as /etc/cloudflare-only.nft, and
+# loads it at boot with cloudflare-firewall.service.
+#
+# The rules live in a table of their own, so they never change Docker's
+# rules or any other firewall on the server. A drop in any table is final.
+# Only ports 80 and 443 are filtered; SSH and everything else is untouched.
+#
+# Loading this file replaces the table in one step, so updating the address
+# ranges or the allowlist never leaves a moment without the rules.
+
+table inet cloudflare_only
+delete table inet cloudflare_only
+
+table inet cloudflare_only {
+	set cloudflare_ipv4 {
+		type ipv4_addr
+		flags interval
+		elements = { @CLOUDFLARE_IPV4@ }
+	}
+
+	set cloudflare_ipv6 {
+		type ipv6_addr
+		flags interval
+		elements = { @CLOUDFLARE_IPV6@ }
+	}
+
+	# Addresses added with `cloudflare.sh allowlist add`, for example a
+	# developer testing the server directly. Either set may be empty.
+	set allowlist_ipv4 {
+		type ipv4_addr
+		flags interval
+		auto-merge
+		@ALLOWLIST_IPV4@
+	}
+
+	set allowlist_ipv6 {
+		type ipv6_addr
+		flags interval
+		auto-merge
+		@ALLOWLIST_IPV6@
+	}
+
+	# Connections Docker forwards to Caddy's published ports. Docker rewrites
+	# their destination to Caddy's container (DNAT), so the port the visitor
+	# connected to is read from connection tracking. Only the visitor's side
+	# of each connection is checked; Caddy's replies, traffic between
+	# containers, and containers' own outgoing connections are not DNAT'd
+	# visitor packets and pass untouched.
+	chain forward {
+		type filter hook forward priority filter - 10; policy accept;
+		ct status dnat ct direction original meta l4proto { tcp, udp } ct original proto-dst { 80, 443 } jump allowed_sources
+	}
+
+	# Connections to ports 80 and 443 on the server itself. Docker accepts
+	# IPv6 connections to published ports this way, through its userland
+	# proxy, when the container's network is IPv4-only.
+	chain input {
+		type filter hook input priority filter - 10; policy accept;
+		iif lo accept
+		meta l4proto { tcp, udp } th dport { 80, 443 } jump allowed_sources
+	}
+
+	# Everything not from Cloudflare or the allowlist is dropped
+	chain allowed_sources {
+		ip saddr @cloudflare_ipv4 return
+		ip6 saddr @cloudflare_ipv6 return
+		ip saddr @allowlist_ipv4 return
+		ip6 saddr @allowlist_ipv6 return
+		drop
+	}
+}

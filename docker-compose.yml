@@ -16,7 +16,7 @@ name: shared
 services:
   # Terminates HTTPS on ports 80 and 443 for the server's own hostname and
   # every project's domains, obtaining and renewing certificates
-  # automatically. The project sites are imported from state/sites/.
+  # automatically. Generated configuration is imported from state/caddy/.
   caddy:
     image: caddy:2
     container_name: shared-caddy
@@ -29,7 +29,7 @@ services:
       - "443:443/udp"
     volumes:
       - ./caddy:/etc/caddy:ro
-      - ./state/sites:/etc/caddy-sites:ro
+      - ./state/caddy:/etc/caddy-state:ro
       - caddy_data:/data
       - caddy_config:/config
     networks:

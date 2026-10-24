@@ -1,0 +1,18 @@
+# Cloudflare-only mode: Caddy takes each visitor's address from the
+# CF-Connecting-IP header that Cloudflare's proxies send, so {client_ip}, the
+# access logs, and the projects see real visitor addresses instead of
+# Cloudflare's.
+#
+# Template: `cloudflare.sh enable` fills in Cloudflare's current address
+# ranges and writes the result to state/caddy/global/cloudflare.Caddyfile,
+# which caddy/Caddyfile imports into its global options.
+#
+# Private ranges are trusted too. Docker hands Caddy IPv6 connections through
+# its userland proxy, which makes them appear to come from the Docker network.
+# The firewall lets only Cloudflare reach ports 80 and 443, so those
+# connections come from Cloudflare as well.
+
+servers {
+	trusted_proxies static private_ranges @CLOUDFLARE_RANGES@
+	client_ip_headers CF-Connecting-IP
+}

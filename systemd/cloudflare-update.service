@@ -1,0 +1,16 @@
+# Updates Cloudflare-only mode's address ranges from Cloudflare's published
+# lists. Started weekly by cloudflare-update.timer, or by hand with
+# `sudo systemctl start cloudflare-update`. Output goes to the journal:
+# `journalctl -u cloudflare-update`.
+#
+# Template: `cloudflare.sh enable` replaces @INSTALL_DIR@ and installs the
+# result in /etc/systemd/system/.
+
+[Unit]
+Description=Update Cloudflare's address ranges for Cloudflare-only mode
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=@INSTALL_DIR@/cloudflare.sh update

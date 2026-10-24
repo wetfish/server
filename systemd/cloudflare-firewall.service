@@ -1,0 +1,21 @@
+# Loads Cloudflare-only mode's firewall rules at boot, before Docker starts
+# publishing ports. Installed by `cloudflare.sh enable`; see
+# cloudflare/firewall.nft.
+#
+# Stopping it removes the rules. Debian's own nftables.service flushes every
+# rule on the server when it starts, so this unit loads after it.
+
+[Unit]
+Description=Accept web traffic only from Cloudflare
+After=nftables.service
+Before=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/cloudflare-only.nft
+ExecReload=/usr/sbin/nft -f /etc/cloudflare-only.nft
+ExecStop=-/usr/sbin/nft delete table inet cloudflare_only
+
+[Install]
+WantedBy=multi-user.target
