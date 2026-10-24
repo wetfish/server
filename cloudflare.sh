@@ -23,7 +23,7 @@
 #
 # Before enabling, every domain on this server, including its own hostname,
 # must be proxied through Cloudflare: anything else becomes unreachable.
-# See "Cloudflare-Only Mode" in README.md.
+# See docs/cloudflare.md.
 
 set -euo pipefail
 
