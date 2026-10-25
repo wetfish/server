@@ -6,15 +6,15 @@
 #
 # Run as root from the clone:
 #
-#   sudo ./cloudflare.sh enable    Turn the mode on (or re-apply it)
-#   sudo ./cloudflare.sh update    Download Cloudflare's address ranges again
-#                                  and apply any changes; runs weekly
-#   sudo ./cloudflare.sh disable   Turn the mode off
-#   sudo ./cloudflare.sh status    Show whether the mode is on
+#   ./cloudflare.sh enable    Turn the mode on (or re-apply it)
+#   ./cloudflare.sh update    Download Cloudflare's address ranges again
+#                             and apply any changes; runs weekly
+#   ./cloudflare.sh disable   Turn the mode off
+#   ./cloudflare.sh status    Show whether the mode is on
 #
-#   sudo ./cloudflare.sh allowlist add <address>
-#   sudo ./cloudflare.sh allowlist remove <address>
-#   sudo ./cloudflare.sh allowlist
+#   ./cloudflare.sh allowlist add <address>
+#   ./cloudflare.sh allowlist remove <address>
+#   ./cloudflare.sh allowlist
 #       Let an address or range besides Cloudflare reach ports 80 and 443,
 #       for example a developer testing the server directly; take it off the
 #       list again; or show the list. Removing an address only takes it off
@@ -55,7 +55,7 @@ fail() {
 # --- Checks -------------------------------------------------------------------
 
 check_system() {
-    [[ "$(id -u)" -eq 0 ]] || fail "run this script as root, for example with sudo"
+    [[ "$(id -u)" -eq 0 ]] || fail "run this script as root: it changes the firewall and systemd"
 
     INSTALL_DIR="$(cd "$(dirname "$0")" && pwd)"
     CLOUDFLARE_DIR="$INSTALL_DIR/generated/cloudflare"
@@ -125,7 +125,7 @@ ranges_changed() {
 
 load_current_ranges() {
     [[ -f "$CLOUDFLARE_DIR/ips-v4.txt" && -f "$CLOUDFLARE_DIR/ips-v6.txt" ]] \
-        || fail "Cloudflare's address ranges are missing; run: sudo ./cloudflare.sh enable"
+        || fail "Cloudflare's address ranges are missing; run: ./cloudflare.sh enable"
 
     NEW_IPV4="$(cat "$CLOUDFLARE_DIR/ips-v4.txt")"
     NEW_IPV6="$(cat "$CLOUDFLARE_DIR/ips-v6.txt")"
@@ -315,7 +315,7 @@ enable() {
 }
 
 update() {
-    is_enabled || fail "Cloudflare-only mode is not enabled; run: sudo ./cloudflare.sh enable"
+    is_enabled || fail "Cloudflare-only mode is not enabled; run: ./cloudflare.sh enable"
 
     download_all || fail "keeping the current address ranges"
 
@@ -360,7 +360,7 @@ disable() {
 }
 
 allowlist() {
-    is_enabled || fail "Cloudflare-only mode is not enabled; run: sudo ./cloudflare.sh enable"
+    is_enabled || fail "Cloudflare-only mode is not enabled; run: ./cloudflare.sh enable"
     load_allowlist
 
     local action="${1:-}" address="${2:-}"
@@ -423,7 +423,7 @@ status() {
     if [[ -f "$CADDY_SETTINGS" ]]; then
         echo "Caddy:                trusts Cloudflare's proxies"
     else
-        echo "Caddy:                NOT CONFIGURED (run: sudo ./cloudflare.sh enable)"
+        echo "Caddy:                NOT CONFIGURED (run: ./cloudflare.sh enable)"
     fi
 
     if [[ -f "$CLOUDFLARE_DIR/ips-v4.txt" ]]; then
@@ -442,8 +442,8 @@ status() {
 
 usage() {
     cat >&2 << EOF
-Usage: sudo $0 enable|update|disable|status
-       sudo $0 allowlist [add|remove <address>]
+Usage: $0 enable|update|disable|status
+       $0 allowlist [add|remove <address>]
 EOF
     exit 1
 }

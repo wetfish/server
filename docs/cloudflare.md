@@ -16,10 +16,10 @@ The SSL/TLS settings apply to the whole Cloudflare zone, so check what they mean
 ## Commands
 
 ```bash
-sudo ./cloudflare.sh enable     # turn it on, or re-apply it
-sudo ./cloudflare.sh status     # show whether it is on, when the ranges were downloaded, and the allowlist
-sudo ./cloudflare.sh update     # download Cloudflare's address ranges again now
-sudo ./cloudflare.sh disable    # turn it off
+./cloudflare.sh enable     # turn it on, or re-apply it
+./cloudflare.sh status     # show whether it is on, when the ranges were downloaded, and the allowlist
+./cloudflare.sh update     # download Cloudflare's address ranges again now
+./cloudflare.sh disable    # turn it off
 ```
 
 `setup.sh` can turn it on too. `enable` installs `nftables` and `curl` if they are missing. Run `disable` before changing a domain back to DNS only.
@@ -36,9 +36,9 @@ curl --resolve stage-wiki.example.com:8443:127.0.0.1 https://stage-wiki.example.
 **The allowlist** lets an address or range reach ports 80 and 443 directly:
 
 ```bash
-sudo ./cloudflare.sh allowlist add 203.0.113.7       # IPv4 or IPv6, an address or a range
-sudo ./cloudflare.sh allowlist remove 203.0.113.7
-sudo ./cloudflare.sh allowlist                       # show the list
+./cloudflare.sh allowlist add 203.0.113.7       # IPv4 or IPv6, an address or a range
+./cloudflare.sh allowlist remove 203.0.113.7
+./cloudflare.sh allowlist                       # show the list
 ```
 
 `remove` only takes an address off the allowlist; it never blocks anything. Addresses that are neither Cloudflare's nor on the allowlist are blocked. Allowed addresses are not trusted to send `CF-Connecting-IP`, so Caddy logs them as themselves. The allowlist survives updates and reboots, and `disable` clears it.
@@ -51,4 +51,4 @@ Either way, point the domain at the server for the test with `curl --resolve` or
 - **Real visitor addresses:** `cloudflare/trusted-proxies.Caddyfile`, with the same ranges filled in, becomes `generated/caddy/global/cloudflare.Caddyfile`, telling Caddy to trust `CF-Connecting-IP` from Cloudflare. Private network ranges are trusted too, because Docker hands Caddy IPv6 connections through its userland proxy, from the Docker network; the firewall ensures those also come from Cloudflare.
 - **Keeping the ranges current:** `cloudflare-update.timer` downloads Cloudflare's lists weekly and applies any change in one step. A failed or malformed download keeps the current ranges, and Caddy settings it rejects are put back, so an update cannot lock out Cloudflare or break Caddy. See its runs with `journalctl -u cloudflare-update`.
 
-Restarting Debian's `nftables.service` flushes every firewall rule on the server, including these and Docker's. If that happens, run `sudo systemctl restart cloudflare-firewall docker`.
+Restarting Debian's `nftables.service` flushes every firewall rule on the server, including these and Docker's. If that happens, run `systemctl restart cloudflare-firewall docker`.

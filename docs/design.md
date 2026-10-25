@@ -16,6 +16,8 @@ Each choice favors what a small community can afford and understand.
 
 **Projects stay independent.** Each project keeps its own repository, Dockerfile, and language version, and runs from its own clone. Upgrading PHP in one never forces an upgrade in another. This repository never pins project versions: a server runs the latest commit of the branch it deploys.
 
+**Projects plug in with plain Compose.** A project needs only a Compose file with a web service. The server connects that one service to its shared network itself, so the same file runs on a laptop and on a server, and projects stay unaware of each other.
+
 **Shared containers are named apart.** Containers from this repository are named `shared-<service>`, and a project's containers are named after the project (`wiki-app`, `wiki-nginx`), so `docker ps` shows what belongs to whom.
 
 **One proxy, no other published ports.** Only Caddy listens on ports 80 and 443, and it obtains certificates automatically. Projects join the shared `web` network instead of publishing ports, which matters because Docker's published ports bypass host firewalls such as ufw.

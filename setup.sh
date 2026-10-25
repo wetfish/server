@@ -4,11 +4,15 @@
 # services. Run as root on Debian 13 (or Ubuntu), either straight from
 # GitHub, which clones the repository into /srv/wetfish-server:
 #
-#   curl -fsSL https://raw.githubusercontent.com/wetfish/server/main/setup.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/wetfish/server/main/setup.sh | bash
 #
 # or from a clone, which stays wherever it is:
 #
-#   sudo ./setup.sh
+#   ./setup.sh
+#
+# Run as yourself from a clone on your own computer, it sets up a local copy
+# for testing instead: it uses the Docker you already have, installs
+# nothing, and serves https://localhost/ unless told otherwise.
 #
 # Settings can be given as options instead of answering prompts; see
 # --help. Safe to re-run: existing settings are kept and every step is
@@ -38,7 +42,7 @@ fail() {
 
 usage() {
     cat << EOF
-Usage: sudo ./setup.sh [options]
+Usage: ./setup.sh [options]
 
   --hostname <name>   This server's own hostname, such as stage.example.com.
                       It receives the GitHub webhooks for every project.
@@ -49,8 +53,13 @@ Usage: sudo ./setup.sh [options]
   --no-cloudflare     Leave Cloudflare-only mode off without asking
   -h, --help          Show this help
 
-Anything not given is asked for. Without a terminal to ask on, a missing
---hostname or --environment is an error, and Cloudflare-only mode stays off.
+As root, anything not given is asked for. Without a terminal to ask on, a
+missing --hostname or --environment is an error, and Cloudflare-only mode
+stays off.
+
+As yourself, setup makes a local copy for testing: the hostname defaults to
+localhost and the environment to staging, and Cloudflare-only mode is not
+available.
 EOF
 }
 
@@ -97,13 +106,20 @@ set_env() {
 }
 
 valid_hostname() {
-    [[ "$1" =~ ^([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]]
+    [[ "$1" == "localhost" || "$1" =~ ^([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]]
 }
 
 # --- Checks -------------------------------------------------------------------
 
+# Run as root, setup prepares a server; run as anyone else, it makes a local
+# copy for testing on your own computer
 check_system() {
-    [[ "$(id -u)" -eq 0 ]] || fail "run this script as root, for example with sudo"
+    if [[ "$(id -u)" -ne 0 ]]; then
+        LOCAL=true
+        return
+    fi
+
+    LOCAL=false
 
     [[ -f /etc/os-release ]] || fail "only Debian and Ubuntu are supported"
     # shellcheck source=/dev/null
@@ -207,6 +223,11 @@ parse_options() {
 choose_settings() {
     local env_file="$INSTALL_DIR/.env"
 
+    if $LOCAL; then
+        choose_local_settings
+        return
+    fi
+
     SERVER_HOSTNAME="$HOSTNAME_OPTION"
 
     if [[ -z "$SERVER_HOSTNAME" ]]; then
@@ -252,7 +273,7 @@ choose_settings() {
         echo "Cloudflare-only mode accepts web traffic only from Cloudflare's proxies."
         echo "Turn it on only once every domain on this server, including $SERVER_HOSTNAME,"
         echo "is proxied through Cloudflare; see docs/cloudflare.md. It can be turned on"
-        echo "later with: sudo ./cloudflare.sh enable"
+        echo "later with: ./cloudflare.sh enable"
         if confirm "Turn on Cloudflare-only mode now?"; then
             ENABLE_CLOUDFLARE=true
         else
@@ -261,6 +282,30 @@ choose_settings() {
     else
         ENABLE_CLOUDFLARE=false
     fi
+}
+
+# A local copy asks nothing: it serves localhost as a staging server unless
+# options or an existing .env say otherwise
+choose_local_settings() {
+    local env_file="$INSTALL_DIR/.env"
+
+    SERVER_HOSTNAME="${HOSTNAME_OPTION:-$(env_value "$env_file" SERVER_HOSTNAME)}"
+    SERVER_HOSTNAME="${SERVER_HOSTNAME:-localhost}"
+    valid_hostname "$SERVER_HOSTNAME" || fail "'$SERVER_HOSTNAME' is not a valid hostname"
+
+    SERVER_ENVIRONMENT="${ENVIRONMENT_OPTION:-$(env_value "$env_file" SERVER_ENVIRONMENT)}"
+    SERVER_ENVIRONMENT="${SERVER_ENVIRONMENT:-staging}"
+    [[ "$SERVER_ENVIRONMENT" == "staging" || "$SERVER_ENVIRONMENT" == "production" ]] \
+        || fail "the environment must be staging or production, not '$SERVER_ENVIRONMENT'"
+
+    [[ "$CLOUDFLARE_OPTION" != "on" ]] || fail "Cloudflare-only mode changes the firewall, so it needs a server set up as root"
+    ENABLE_CLOUDFLARE=false
+}
+
+check_local_docker() {
+    command -v docker > /dev/null || fail "install Docker first; setup only installs it on a server, as root"
+    docker info > /dev/null 2>&1 || fail "Docker is installed, but $(id -un) cannot use it; add yourself to the docker group, then log in again"
+    docker compose version > /dev/null 2>&1 || fail "install the Docker Compose plugin first"
 }
 
 # --- Setup steps --------------------------------------------------------------
@@ -327,15 +372,14 @@ install_docker() {
     systemctl enable --quiet --now docker
 }
 
-# Deploys run as this user, which has no password or login shell. It is in
-# the docker group, which is equivalent to root access.
+# The webhook listener runs as this user, which has no password or login
+# shell, and can only write deploy requests: the trigger files that start
+# deploys
 ensure_deploy_user() {
     if ! id "$DEPLOY_USER" > /dev/null 2>&1; then
         info "Creating the $DEPLOY_USER user"
         useradd --system --create-home --shell /usr/sbin/nologin "$DEPLOY_USER"
     fi
-
-    usermod -aG docker "$DEPLOY_USER"
 }
 
 # Docker's published ports bypass ufw for IPv4, but ufw still blocks the
@@ -361,19 +405,45 @@ write_env() {
     chmod 600 "$env_file"
     set_env "$env_file" SERVER_HOSTNAME "$SERVER_HOSTNAME"
     set_env "$env_file" SERVER_ENVIRONMENT "$SERVER_ENVIRONMENT"
-    set_env "$env_file" UID "$(id -u "$DEPLOY_USER")"
-    set_env "$env_file" GID "$(id -g "$DEPLOY_USER")"
+
+    # The webhook listener runs as the deploy user on a server, and as you
+    # in a local copy
+    if $LOCAL; then
+        set_env "$env_file" UID "$(id -u)"
+        set_env "$env_file" GID "$(id -g)"
+    else
+        set_env "$env_file" UID "$(id -u "$DEPLOY_USER")"
+        set_env "$env_file" GID "$(id -g "$DEPLOY_USER")"
+    fi
 }
 
 # The directories must exist before the containers start, or Docker creates
-# them owned by root. The webhook runs as the deploy user and writes the
-# trigger files. config/ holds the projects' webhook secrets.
+# them owned by root. The webhook writes the trigger files. config/ holds the
+# projects' webhook secrets.
 create_dirs() {
     mkdir -p "$INSTALL_DIR"/generated/{caddy/global,caddy/sites,caddy/hostname,webhook,triggers}
-    chown "$DEPLOY_USER:$DEPLOY_USER" "$INSTALL_DIR/generated/triggers"
+    $LOCAL || chown "$DEPLOY_USER:$DEPLOY_USER" "$INSTALL_DIR/generated/triggers"
 
     mkdir -p "$INSTALL_DIR/config"
     chmod 700 "$INSTALL_DIR/config"
+}
+
+# Installs the templates for each project's deploy units, with this clone's
+# path filled in. They are copied rather than linked, so changes to the clone
+# never change the host's services until setup runs again. apply.sh turns on
+# one path unit per project.
+install_deploy_units() {
+    info "Installing the systemd units that run deploys"
+
+    local unit
+    for unit in project-deploy@.path project-deploy@.service; do
+        DIR="$INSTALL_DIR" awk '{
+            gsub(/@INSTALL_DIR@/, ENVIRON["DIR"])
+            print
+        }' "$INSTALL_DIR/systemd/$unit" > "/etc/systemd/system/$unit"
+    done
+
+    systemctl daemon-reload
 }
 
 # Generates the Caddy sites and webhooks for the projects in config/
@@ -393,8 +463,25 @@ apply_cloudflare() {
     fi
 }
 
+print_local_summary() {
+    cat << EOF
+
+==============================================================================
+Local copy ready: https://$SERVER_HOSTNAME/
+
+  Installed in:  $INSTALL_DIR
+  Environment:   $SERVER_ENVIRONMENT
+
+https://$SERVER_HOSTNAME/ answers "OK", with a certificate from Caddy's own
+local authority, which your browser does not trust: use curl -k, or accept
+the warning. Add a project with ./add-project.sh, giving it a domain such as
+<name>.localhost, which needs no DNS.
+==============================================================================
+EOF
+}
+
 print_summary() {
-    local cloudflare="off (turn it on with: sudo ./cloudflare.sh enable)"
+    local cloudflare="off (turn it on with: ./cloudflare.sh enable)"
     [[ "$ENABLE_CLOUDFLARE" != true ]] || cloudflare="on"
 
     cat << EOF
@@ -424,11 +511,24 @@ main() {
 
     INSTALL_DIR="$(clone_dir)"
     if [[ -z "$INSTALL_DIR" ]]; then
+        $LOCAL && fail "setting up a server needs root; to try this on your own computer, clone the repository and run ./setup.sh from the clone"
         bootstrap "$@"
     fi
 
     # The path is written into systemd units, so keep it to plain characters
     [[ "$INSTALL_DIR" =~ ^[A-Za-z0-9._/-]+$ ]] || fail "the repository path may only contain letters, numbers, '.', '_', '-', and '/' ($INSTALL_DIR)"
+
+    if $LOCAL; then
+        echo "Setting up a local copy for testing in $INSTALL_DIR"
+        check_local_docker
+        choose_settings
+        write_env
+        create_dirs
+        apply_projects
+        start_services
+        print_local_summary
+        return
+    fi
 
     echo "Setting up this server from $INSTALL_DIR"
     choose_settings
@@ -440,6 +540,7 @@ main() {
     open_ufw
     write_env
     create_dirs
+    install_deploy_units
     apply_projects
     start_services
     apply_cloudflare

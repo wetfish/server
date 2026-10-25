@@ -7,3 +7,6 @@
 # Written by the scripts on each server: Caddy sites, webhook definitions,
 # deploy trigger files, and Cloudflare-only mode's address ranges
 /generated/
+
+# The project clones, written by deploys
+/projects/

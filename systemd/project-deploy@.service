@@ -1,0 +1,15 @@
+# Deploys a project. Started by project-deploy@<project>.path, or by hand
+# with `systemctl start project-deploy@<project>`. Output goes to the
+# journal: `journalctl -u project-deploy@<project>`.
+#
+# Template: setup.sh replaces @INSTALL_DIR@ and installs the result in
+# /etc/systemd/system/.
+
+[Unit]
+Description=Deploy %i
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=@INSTALL_DIR@/deploy.sh %i

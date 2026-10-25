@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+#
+# Removes a project from this server: stops its containers, deletes
+# config/<name>.conf, and applies the configuration, so Caddy stops serving
+# its domains and its webhook is gone. Its clone in projects/<name> and its
+# Docker volumes are kept. Run from the clone, as root on a server or as
+# yourself on your own computer:
+#
+#   ./remove-project.sh glitch
+#   ./remove-project.sh glitch --yes    # without asking to confirm
+#
+# See "Projects" in docs/how-it-works.md.
+
+set -euo pipefail
+
+info() {
+    echo "==> $*"
+}
+
+fail() {
+    echo "Error: $*" >&2
+    exit 1
+}
+
+usage() {
+    echo "Usage: ./remove-project.sh <name> [--yes]" >&2
+    exit 1
+}
+
+main() {
+    local name="" confirmed=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -y | --yes) confirmed=true ;;
+            -h | --help | -*) usage ;;
+            *)
+                [[ -z "$name" ]] || usage
+                name="$1"
+                ;;
+        esac
+        shift
+    done
+
+    [[ -n "$name" ]] || usage
+
+    local install_dir config_file reply
+    install_dir="$(cd "$(dirname "$0")" && pwd)"
+    config_file="$install_dir/config/$name.conf"
+
+    [[ "$name" =~ ^[a-z][a-z0-9-]*$ && -f "$config_file" ]] || fail "$name is not on this server (no config/$name.conf)"
+
+    if ! $confirmed; then
+        [[ -t 0 ]] || fail "pass --yes to remove $name without a terminal to confirm on"
+        read -r -p "Remove $name? Its domains stop being served and its webhook stops working. [y/N]: " reply
+        [[ "$reply" =~ ^[Yy] ]] || fail "$name was not removed"
+    fi
+
+    info "Removing $name"
+
+    # Kept until the configuration applies, so a failure leaves the
+    # project where it was
+    local backup
+    backup="$(mktemp)"
+    mv "$config_file" "$backup"
+
+    if ! "$install_dir/apply.sh"; then
+        mv "$backup" "$config_file"
+        fail "$name was not removed"
+    fi
+    rm -f "$backup"
+
+    info "Stopping $name's containers"
+    docker compose --project-name "$name" down --remove-orphans
+    rm -rf "$install_dir/generated/projects/$name"
+
+    echo
+    echo "Removed $name. Delete its webhook in GitHub (the repository's Settings → Webhooks)."
+    if [[ -d "$install_dir/projects/$name" ]]; then
+        echo "Its clone in projects/$name and its Docker volumes are kept; delete them if"
+        echo "nothing in them is needed."
+    fi
+}
+
+main "$@"
+exit

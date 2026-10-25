@@ -17,23 +17,27 @@ So we build systems that anyone can replicate. Everything here is open source an
 - Running the same way on staging (each project's `main` branch) and production (`release`), and on separate servers for separate groups of projects.
 - Optionally accepting web traffic only through Cloudflare, which hides the server's address.
 
-**Status:** server setup, the shared proxy and webhook listener, project configuration, and Cloudflare-only mode work. Deploys, a command for adding projects, shared databases, and backups are next.
+**Status:** server setup, the shared proxy and webhook listener, adding and deploying projects, and Cloudflare-only mode work. Shared databases and backups are next.
 
 ## Getting Started
 
-You need a server running Debian 13 (Ubuntu works too) and a hostname for it, such as `stage.example.com`, with a DNS record pointing at the server. Then run:
+You need a server running Debian 13 (Ubuntu works too) and a hostname for it, such as `stage.example.com`, with a DNS record pointing at the server. Then, as root:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wetfish/server/main/setup.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/wetfish/server/main/setup.sh | bash
 ```
 
 Setup installs Docker, clones this repository into `/srv/wetfish-server`, asks for the hostname and whether the server is for staging or production, and starts the shared services. When it finishes, `https://<hostname>/` answers `OK`.
 
-To keep the repository somewhere else, clone it there and run `sudo ./setup.sh` from the clone. Setup is safe to re-run, and accepts its answers as options for unattended installs; see `./setup.sh --help`.
+To keep the repository somewhere else, clone it there and run `./setup.sh` from the clone. Setup is safe to re-run, and accepts its answers as options for unattended installs; see `./setup.sh --help`.
+
+Then add projects with `./add-project.sh`; [Preparing a Project](docs/how-it-works.md#preparing-a-project) covers what a project's repository needs.
+
+To try it on your own computer first, clone the repository and run `./setup.sh` as yourself: it sets up a [local copy](docs/how-it-works.md#a-local-copy-for-testing) that serves `https://localhost/`, without installing anything.
 
 ## Documentation
 
-- [How it works](docs/how-it-works.md): the shared services, setup, adding projects, and files
+- [How it works](docs/how-it-works.md): setup, adding and deploying projects, preparing a project, and files
 - [Cloudflare-only mode](docs/cloudflare.md): accepting web traffic only through Cloudflare
 - [Design decisions](docs/design.md): why it is built this way
 

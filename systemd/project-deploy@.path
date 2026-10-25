@@ -1,0 +1,14 @@
+# Starts project-deploy@<project>.service when the webhook writes the
+# project's trigger file. apply.sh turns one on for each project.
+#
+# Template: setup.sh replaces @INSTALL_DIR@ and installs the result in
+# /etc/systemd/system/.
+
+[Unit]
+Description=Watch for deploy requests for %i
+
+[Path]
+PathChanged=@INSTALL_DIR@/generated/triggers/%i
+
+[Install]
+WantedBy=multi-user.target

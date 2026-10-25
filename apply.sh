@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
 # Applies this server's project configuration: generates each project's
-# Caddy site and webhook from config/<project>.conf, then reloads Caddy and
-# the webhook listener. Run as root from the clone after adding, changing,
-# or removing a file in config/:
+# Caddy site and webhook from config/<project>.conf, reloads Caddy and the
+# webhook listener, and on a server turns on each project's deploys. Run
+# from the clone after changing a file in config/, as root on a server or as
+# yourself on your own computer:
 #
-#   sudo ./apply.sh
+#   ./apply.sh
 #
 # Every file is checked before anything changes, and if Caddy rejects the
 # generated configuration, the previous files are put back. The format is
@@ -18,7 +19,7 @@ NAME_PATTERN='^[a-z][a-z0-9-]*$'
 DOMAIN_PATTERN='^([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$'
 BRANCH_PATTERN='^[A-Za-z0-9._/-]+$'
 SECRET_PATTERN='^[A-Za-z0-9_-]{16,}$'
-UPSTREAM_PATTERN='^[A-Za-z0-9._-]+:[0-9]+$'
+UPSTREAM_PATTERN='^[a-z0-9][a-z0-9_.-]*:[0-9]+$'
 KEYS_PATTERN='^(REPO|BRANCH|DOMAINS|REDIRECTS|UPSTREAM|WEBHOOK_SECRET)='
 
 # All work happens in functions called from the last line, so a `git pull`
@@ -48,8 +49,6 @@ file_value() {
 }
 
 check_system() {
-    [[ "$(id -u)" -eq 0 ]] || fail "run this script as root, for example with sudo"
-
     INSTALL_DIR="$(cd "$(dirname "$0")" && pwd)"
     CONFIG_DIR="$INSTALL_DIR/config"
     GENERATED_DIR="$INSTALL_DIR/generated"
@@ -112,10 +111,10 @@ load_projects() {
         [[ -n "$secret" ]] || fail "$label: WEBHOOK_SECRET is missing"
 
         branch="${branch:-$DEFAULT_BRANCH}"
-        upstream="${upstream:-$name-nginx:80}"
+        upstream="${upstream:-nginx:80}"
 
         [[ "$branch" =~ $BRANCH_PATTERN ]] || fail "$label: '$branch' is not a valid BRANCH"
-        [[ "$upstream" =~ $UPSTREAM_PATTERN ]] || fail "$label: UPSTREAM must look like <container>:<port>, such as $name-nginx:80"
+        [[ "$upstream" =~ $UPSTREAM_PATTERN ]] || fail "$label: UPSTREAM must look like <service>:<port>, such as nginx:80"
         [[ "$secret" =~ $SECRET_PATTERN ]] || fail "$label: WEBHOOK_SECRET must be at least 16 letters, numbers, '-', or '_'; generate one with: openssl rand -hex 32"
 
         for domain in $domains $redirects; do
@@ -132,7 +131,9 @@ load_projects() {
         P_BRANCH[$name]="$branch"
         P_DOMAINS[$name]="$domains"
         P_REDIRECTS[$name]="$redirects"
-        P_UPSTREAM[$name]="$upstream"
+        # Caddy reaches the service by the alias deploy.sh gives it on the
+        # shared web network
+        P_UPSTREAM[$name]="$name-$upstream"
         P_SECRET[$name]="$secret"
     done
     shopt -u nullglob
@@ -303,13 +304,37 @@ apply_hooks() {
     fi
 
     mkdir -p "$GENERATED_DIR/webhook"
-    install -m 0640 -o root -g "$DEPLOY_GID" "$new" "$current"
+    install -m 0640 -g "$DEPLOY_GID" "$new" "$current"
 
     # The listener only reads its hooks when it starts
     if running shared-webhook; then
         info "Restarting the webhook listener"
         docker restart shared-webhook > /dev/null
     fi
+}
+
+# On a server, a systemd path unit per project starts its deploy whenever
+# the webhook writes the project's trigger file. Elsewhere, such as on your
+# own computer, deploys run by hand or with `./deploy.sh --watch`.
+deploys_automatic() {
+    [[ "$(id -u)" -eq 0 && -d /run/systemd/system && -f /etc/systemd/system/project-deploy@.path ]]
+}
+
+apply_deploy_units() {
+    deploys_automatic || return 0
+
+    local name unit enabled
+    for name in "${PROJECTS[@]}"; do
+        systemctl enable --quiet --now "project-deploy@$name.path"
+    done
+
+    # Projects that were removed
+    for unit in /etc/systemd/system/multi-user.target.wants/project-deploy@*.path; do
+        [[ -e "$unit" ]] || continue
+        enabled="$(basename "$unit" .path)"
+        enabled="${enabled#project-deploy@}"
+        [[ -f "$CONFIG_DIR/$enabled.conf" ]] || systemctl disable --quiet --now "project-deploy@$enabled.path"
+    done
 }
 
 print_summary() {
@@ -329,6 +354,12 @@ print_summary() {
         [[ -z "${P_REDIRECTS[$name]}" ]] || echo "      Redirects: ${P_REDIRECTS[$name]}"
         echo "      Webhook:  https://$SERVER_HOSTNAME/hooks/$name"
     done
+
+    if ! deploys_automatic; then
+        echo
+        echo "Deploys here run by hand: ./deploy.sh <project>, or ./deploy.sh --watch to"
+        echo "deploy whenever the webhook requests it, as a server does."
+    fi
 }
 
 # --- Main ---------------------------------------------------------------------
@@ -339,7 +370,8 @@ main() {
     check_system
 
     # Never apply two changes at once
-    exec 9> /run/wetfish-server-apply.lock
+    mkdir -p "$GENERATED_DIR"
+    exec 9> "$GENERATED_DIR/apply.lock"
     flock 9
 
     load_projects
@@ -352,6 +384,7 @@ main() {
 
     apply_caddy "$WORK_DIR/new" "$WORK_DIR/backup"
     apply_hooks "$WORK_DIR/new/webhook/hooks.json"
+    apply_deploy_units
     print_summary
 }
 
