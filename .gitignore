@@ -1,6 +1,9 @@
 # Server settings, with secrets
 /.env
 
-# Generated on each server: project sites, webhook definitions, and
-# deploy trigger files
-/state/
+# The projects this server runs, with their webhook secrets
+/config/
+
+# Written by the scripts on each server: Caddy sites, webhook definitions,
+# deploy trigger files, and Cloudflare-only mode's address ranges
+/generated/

@@ -42,12 +42,15 @@ Usage: sudo ./setup.sh [options]
 
   --hostname <name>   This server's own hostname, such as stage.example.com.
                       It receives the GitHub webhooks for every project.
+  --environment <env> staging or production. Staging deploys each project's
+                      main branch and keeps its sites out of search results;
+                      production deploys release.
   --cloudflare        Turn on Cloudflare-only mode (see docs/cloudflare.md)
   --no-cloudflare     Leave Cloudflare-only mode off without asking
   -h, --help          Show this help
 
 Anything not given is asked for. Without a terminal to ask on, a missing
---hostname is an error, and Cloudflare-only mode stays off.
+--hostname or --environment is an error, and Cloudflare-only mode stays off.
 EOF
 }
 
@@ -156,6 +159,7 @@ bootstrap() {
 
 parse_options() {
     HOSTNAME_OPTION=""
+    ENVIRONMENT_OPTION=""
     CLOUDFLARE_OPTION=""
 
     while [[ $# -gt 0 ]]; do
@@ -167,6 +171,15 @@ parse_options() {
                 ;;
             --hostname=*)
                 HOSTNAME_OPTION="${1#*=}"
+                shift
+                ;;
+            --environment)
+                [[ $# -ge 2 ]] || fail "--environment needs a value"
+                ENVIRONMENT_OPTION="$2"
+                shift 2
+                ;;
+            --environment=*)
+                ENVIRONMENT_OPTION="${1#*=}"
                 shift
                 ;;
             --cloudflare)
@@ -212,6 +225,20 @@ choose_settings() {
     fi
 
     valid_hostname "$SERVER_HOSTNAME" || fail "'$SERVER_HOSTNAME' is not a valid hostname"
+
+    SERVER_ENVIRONMENT="${ENVIRONMENT_OPTION:-$(env_value "$env_file" SERVER_ENVIRONMENT)}"
+
+    if [[ -z "$SERVER_ENVIRONMENT" ]]; then
+        interactive || fail "pass --environment staging or --environment production"
+
+        echo
+        echo "A staging server deploys each project's main branch and keeps its sites out"
+        echo "of search results. A production server deploys each project's release branch."
+        SERVER_ENVIRONMENT="$(ask "Environment (staging or production)")"
+    fi
+
+    [[ "$SERVER_ENVIRONMENT" == "staging" || "$SERVER_ENVIRONMENT" == "production" ]] \
+        || fail "the environment must be staging or production, not '$SERVER_ENVIRONMENT'"
 
     if [[ "$CLOUDFLARE_OPTION" == "on" ]]; then
         ENABLE_CLOUDFLARE=true
@@ -333,16 +360,26 @@ write_env() {
 
     chmod 600 "$env_file"
     set_env "$env_file" SERVER_HOSTNAME "$SERVER_HOSTNAME"
+    set_env "$env_file" SERVER_ENVIRONMENT "$SERVER_ENVIRONMENT"
     set_env "$env_file" UID "$(id -u "$DEPLOY_USER")"
     set_env "$env_file" GID "$(id -g "$DEPLOY_USER")"
 }
 
 # The directories must exist before the containers start, or Docker creates
 # them owned by root. The webhook runs as the deploy user and writes the
-# trigger files.
-create_state_dirs() {
-    mkdir -p "$INSTALL_DIR"/state/{caddy/global,caddy/sites,webhook,triggers}
-    chown "$DEPLOY_USER:$DEPLOY_USER" "$INSTALL_DIR/state/triggers"
+# trigger files. config/ holds the projects' webhook secrets.
+create_dirs() {
+    mkdir -p "$INSTALL_DIR"/generated/{caddy/global,caddy/sites,caddy/hostname,webhook,triggers}
+    chown "$DEPLOY_USER:$DEPLOY_USER" "$INSTALL_DIR/generated/triggers"
+
+    mkdir -p "$INSTALL_DIR/config"
+    chmod 700 "$INSTALL_DIR/config"
+}
+
+# Generates the Caddy sites and webhooks for the projects in config/
+apply_projects() {
+    info "Applying the project configuration"
+    "$INSTALL_DIR/apply.sh"
 }
 
 start_services() {
@@ -366,6 +403,7 @@ print_summary() {
 Setup complete: https://$SERVER_HOSTNAME/
 
   Installed in:          $INSTALL_DIR
+  Environment:           $SERVER_ENVIRONMENT
   Cloudflare-only mode:  $cloudflare
 
 From your own machine, https://$SERVER_HOSTNAME/ should answer "OK" once its
@@ -401,7 +439,8 @@ main() {
     ensure_deploy_user
     open_ufw
     write_env
-    create_state_dirs
+    create_dirs
+    apply_projects
     start_services
     apply_cloudflare
     print_summary

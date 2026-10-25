@@ -4,9 +4,9 @@
 # It receives GitHub push webhooks and only writes trigger files. It has no
 # Docker access; the host's systemd units run the deploys.
 #
-# The hook definitions, with each project's secret, are generated on the
-# server into state/webhook/hooks.json and mounted read-only, so they never
-# enter the image.
+# The hook definitions, with each project's secret, are written by apply.sh
+# to generated/webhook/hooks.json and mounted read-only, so they never enter
+# the image.
 
 FROM debian:trixie-slim
 

@@ -58,9 +58,9 @@ check_system() {
     [[ "$(id -u)" -eq 0 ]] || fail "run this script as root, for example with sudo"
 
     INSTALL_DIR="$(cd "$(dirname "$0")" && pwd)"
-    STATE_DIR="$INSTALL_DIR/state/cloudflare"
-    ALLOWLIST_FILE="$STATE_DIR/allowlist.txt"
-    CADDY_SETTINGS="$INSTALL_DIR/state/caddy/global/cloudflare.Caddyfile"
+    CLOUDFLARE_DIR="$INSTALL_DIR/generated/cloudflare"
+    ALLOWLIST_FILE="$CLOUDFLARE_DIR/allowlist.txt"
+    CADDY_SETTINGS="$INSTALL_DIR/generated/caddy/global/cloudflare.Caddyfile"
 
     # The path is written into a systemd unit, so keep it to plain characters
     [[ "$INSTALL_DIR" =~ ^[A-Za-z0-9._/-]+$ ]] || fail "the repository path may only contain letters, numbers, '.', '_', '-', and '/' ($INSTALL_DIR)"
@@ -119,16 +119,16 @@ download_all() {
 }
 
 ranges_changed() {
-    [[ "$NEW_IPV4" != "$(cat "$STATE_DIR/ips-v4.txt" 2> /dev/null)" ]] \
-        || [[ "$NEW_IPV6" != "$(cat "$STATE_DIR/ips-v6.txt" 2> /dev/null)" ]]
+    [[ "$NEW_IPV4" != "$(cat "$CLOUDFLARE_DIR/ips-v4.txt" 2> /dev/null)" ]] \
+        || [[ "$NEW_IPV6" != "$(cat "$CLOUDFLARE_DIR/ips-v6.txt" 2> /dev/null)" ]]
 }
 
 load_current_ranges() {
-    [[ -f "$STATE_DIR/ips-v4.txt" && -f "$STATE_DIR/ips-v6.txt" ]] \
+    [[ -f "$CLOUDFLARE_DIR/ips-v4.txt" && -f "$CLOUDFLARE_DIR/ips-v6.txt" ]] \
         || fail "Cloudflare's address ranges are missing; run: sudo ./cloudflare.sh enable"
 
-    NEW_IPV4="$(cat "$STATE_DIR/ips-v4.txt")"
-    NEW_IPV6="$(cat "$STATE_DIR/ips-v6.txt")"
+    NEW_IPV4="$(cat "$CLOUDFLARE_DIR/ips-v4.txt")"
+    NEW_IPV6="$(cat "$CLOUDFLARE_DIR/ips-v6.txt")"
 }
 
 # --- Allowlist ----------------------------------------------------------------
@@ -198,7 +198,7 @@ render() {
 # --- Caddy --------------------------------------------------------------------
 
 caddy_running() {
-    command -v docker > /dev/null && [[ -n "$(docker ps --quiet --filter 'name=^shared-caddy$')" ]]
+    command -v docker > /dev/null && [[ -n "$(docker ps --quiet --filter 'name=^shared-caddy$' 2> /dev/null)" ]]
 }
 
 reload_caddy() {
@@ -265,9 +265,9 @@ install_ruleset() {
     install -m 0644 "$NEW_RULESET" "$RULESET"
     rm -f "$NEW_RULESET"
 
-    mkdir -p "$STATE_DIR"
-    printf '%s\n' "$NEW_IPV4" > "$STATE_DIR/ips-v4.txt"
-    printf '%s\n' "$NEW_IPV6" > "$STATE_DIR/ips-v6.txt"
+    mkdir -p "$CLOUDFLARE_DIR"
+    printf '%s\n' "$NEW_IPV4" > "$CLOUDFLARE_DIR/ips-v4.txt"
+    printf '%s\n' "$NEW_IPV6" > "$CLOUDFLARE_DIR/ips-v6.txt"
 
     if [[ -n "$ALLOWLIST" ]]; then
         printf '%s\n' "$ALLOWLIST" > "$ALLOWLIST_FILE"
@@ -352,7 +352,7 @@ disable() {
     systemctl daemon-reload
 
     rm -f "$RULESET"
-    rm -rf "$STATE_DIR"
+    rm -rf "$CLOUDFLARE_DIR"
 
     info "Cloudflare-only mode is disabled"
     echo "    Ports 80 and 443 accept connections from anywhere."
@@ -426,8 +426,8 @@ status() {
         echo "Caddy:                NOT CONFIGURED (run: sudo ./cloudflare.sh enable)"
     fi
 
-    if [[ -f "$STATE_DIR/ips-v4.txt" ]]; then
-        echo "Address ranges:       $(wc -l < "$STATE_DIR/ips-v4.txt") IPv4, $(wc -l < "$STATE_DIR/ips-v6.txt") IPv6, downloaded $(date -r "$STATE_DIR/ips-v4.txt" '+%Y-%m-%d')"
+    if [[ -f "$CLOUDFLARE_DIR/ips-v4.txt" ]]; then
+        echo "Address ranges:       $(wc -l < "$CLOUDFLARE_DIR/ips-v4.txt") IPv4, $(wc -l < "$CLOUDFLARE_DIR/ips-v6.txt") IPv6, downloaded $(date -r "$CLOUDFLARE_DIR/ips-v4.txt" '+%Y-%m-%d')"
     fi
 
     load_allowlist

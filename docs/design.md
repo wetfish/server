@@ -12,6 +12,8 @@ Each choice favors what a small community can afford and understand.
 
 **The webhook listener cannot touch Docker.** It is the only part of the deploy system reachable from the internet, so it only checks signatures and writes trigger files; systemd on the host runs the deploys. Docker access is equivalent to root access, so the listener never gets it.
 
+**Each server keeps its own project list.** A server's projects, domains, and webhook secrets live in its own `config/` directory, never in this repository, so anyone can run their own set of sites without changing it, and moving to a new server means copying `config/` and running setup.
+
 **Projects stay independent.** Each project keeps its own repository, Dockerfile, and language version, and runs from its own clone. Upgrading PHP in one never forces an upgrade in another. This repository never pins project versions: a server runs the latest commit of the branch it deploys.
 
 **Shared containers are named apart.** Containers from this repository are named `shared-<service>`, and a project's containers are named after the project (`wiki-app`, `wiki-nginx`), so `docker ps` shows what belongs to whom.

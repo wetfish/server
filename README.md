@@ -17,7 +17,7 @@ So we build systems that anyone can replicate. Everything here is open source an
 - Running the same way on staging (each project's `main` branch) and production (`release`), and on separate servers for separate groups of projects.
 - Optionally accepting web traffic only through Cloudflare, which hides the server's address.
 
-**Status:** server setup, the shared proxy and webhook listener, and Cloudflare-only mode work. Adding projects, deploys, shared databases, and backups are next.
+**Status:** server setup, the shared proxy and webhook listener, project configuration, and Cloudflare-only mode work. Deploys, a command for adding projects, shared databases, and backups are next.
 
 ## Getting Started
 
@@ -27,13 +27,13 @@ You need a server running Debian 13 (Ubuntu works too) and a hostname for it, su
 curl -fsSL https://raw.githubusercontent.com/wetfish/server/main/setup.sh | sudo bash
 ```
 
-Setup installs Docker, clones this repository into `/srv/wetfish-server`, asks for the hostname, and starts the shared services. When it finishes, `https://<hostname>/` answers `OK`.
+Setup installs Docker, clones this repository into `/srv/wetfish-server`, asks for the hostname and whether the server is for staging or production, and starts the shared services. When it finishes, `https://<hostname>/` answers `OK`.
 
 To keep the repository somewhere else, clone it there and run `sudo ./setup.sh` from the clone. Setup is safe to re-run, and accepts its answers as options for unattended installs; see `./setup.sh --help`.
 
 ## Documentation
 
-- [How it works](docs/how-it-works.md): the shared services, setup, files, and settings
+- [How it works](docs/how-it-works.md): the shared services, setup, adding projects, and files
 - [Cloudflare-only mode](docs/cloudflare.md): accepting web traffic only through Cloudflare
 - [Design decisions](docs/design.md): why it is built this way
 

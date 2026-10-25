@@ -16,7 +16,7 @@ name: shared
 services:
   # Terminates HTTPS on ports 80 and 443 for the server's own hostname and
   # every project's domains, obtaining and renewing certificates
-  # automatically. Generated configuration is imported from state/caddy/.
+  # automatically. Generated configuration is imported from generated/caddy/.
   caddy:
     image: caddy:2
     container_name: shared-caddy
@@ -29,7 +29,7 @@ services:
       - "443:443/udp"
     volumes:
       - ./caddy:/etc/caddy:ro
-      - ./state/caddy:/etc/caddy-state:ro
+      - ./generated/caddy:/etc/caddy-generated:ro
       - caddy_data:/data
       - caddy_config:/config
     networks:
@@ -37,7 +37,7 @@ services:
 
   # Receives GitHub push webhooks at /hooks/<project>, each project with its
   # own secret. A signed push to the branch this server deploys writes the
-  # project's trigger file in state/triggers/. It has no Docker access.
+  # project's trigger file in generated/triggers/. It has no Docker access.
   webhook:
     build:
       context: ./webhook
@@ -45,8 +45,8 @@ services:
     restart: unless-stopped
     user: "${UID:-1000}:${GID:-1000}"
     volumes:
-      - ./state/webhook:/hooks:ro
-      - ./state/triggers:/triggers
+      - ./generated/webhook:/hooks:ro
+      - ./generated/triggers:/triggers
     networks:
       - web
 
