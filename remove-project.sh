@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 #
 # Removes a project from this server: stops its containers, deletes
-# config/<name>.conf, and applies the configuration, so Caddy stops serving
-# its domains and its webhook is gone. Its clone in projects/<name>, its
-# Docker volumes, and its database on the shared database are kept. Run from
-# the clone, as root on a server or as yourself on your own computer:
+# config/<name>.conf and its env files in config/<name>/, and applies the
+# configuration, so Caddy stops serving its domains and its webhook is gone.
+# Its clone in projects/<name>, its Docker volumes, and its database on the
+# shared database are kept. Run from the clone, as root on a server or as
+# yourself on your own computer:
 #
 #   ./remove-project.sh glitch
 #   ./remove-project.sh glitch --yes    # without asking to confirm
@@ -73,6 +74,7 @@ main() {
         fail "$name was not removed"
     fi
     rm -f "$backup"
+    rm -rf "${install_dir:?}/config/$name"
 
     info "Stopping $name's containers"
     docker compose --project-name "$name" down --remove-orphans

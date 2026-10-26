@@ -386,6 +386,16 @@ deploy_commit() {
     COMMIT="$(git -C "$PROJECT_DIR" rev-parse HEAD)"
     log "Deploying $NAME $(git -C "$PROJECT_DIR" log -1 --format='%h %s')"
 
+    # Fills in the env files the commit's setup.conf asks for, and copies
+    # config/<name>/ into the clone, before Compose reads the files
+    "$INSTALL_DIR/configure-project.sh" --deploy "$NAME" "$COMMIT" \
+        || fail "setting up $NAME's env files failed; the running containers were left unchanged"
+
+    # setup.conf may have just given the project a database
+    if [[ -n "$(file_value "$INSTALL_DIR/config/$NAME.conf" DATABASE_PASSWORD)" ]]; then
+        USES_DATABASE=true
+    fi
+
     PROJECT_COMPOSE="$(compose_file)" || fail "projects/$NAME has no docker-compose.yml or compose.yaml"
     BUILT_SERVICES="$(built_services)" || fail "the Compose configuration of $NAME is not valid"
     DATABASE_SERVICES="$(database_services)" || fail "the Compose configuration of $NAME is not valid"

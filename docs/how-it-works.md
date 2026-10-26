@@ -73,9 +73,46 @@ Add a project with `add-project.sh`, which asks for anything not given as an opt
 | `--branch <branch>` | The branch to deploy, instead of `main` on staging or `release` on production |
 | `--upstream <service:port>` | The Compose service and port that serve the project, instead of `nginx:80` |
 
-It writes `config/<name>.conf` with a new webhook secret, applies the configuration, deploys the project for the first time, and prints the webhook to add in GitHub, under the repository's Settings → Webhooks: the payload URL, content type `application/json`, the secret, and only the push event. If the project cannot be added, for example because another project already uses one of its domains, nothing changes. If only its first deploy fails, the project stays added: fix the problem and run `./deploy.sh <name>`.
+It writes `config/<name>.conf` with a new webhook secret, sets up the env files the project's [setup.conf](#project-setup) asks for, asking for any values that have to be entered by hand, applies the configuration, deploys the project for the first time, and prints the webhook to add in GitHub, under the repository's Settings → Webhooks: the payload URL, content type `application/json`, the secret, and only the push event. If the project cannot be added, for example because another project already uses one of its domains, or the add is interrupted, nothing changes, though its clone in `projects/<name>` is kept for adding it again. If only its first deploy fails, the project stays added: fix the problem and run `./deploy.sh <name>`.
 
-Remove a project with `./remove-project.sh <name>`, which asks to confirm unless given `--yes`. It stops the project's containers; its domains stop being served and its webhook stops working, so delete the webhook in GitHub too. Its clone in `projects/<name>`, its Docker volumes, and its [database](#databases) are kept; it prints how to delete the database.
+Remove a project with `./remove-project.sh <name>`, which asks to confirm unless given `--yes`. It stops the project's containers; its domains stop being served and its webhook stops working, so delete the webhook in GitHub too. Its env files in `config/<name>/` are deleted. Its clone in `projects/<name>`, its Docker volumes, and its [database](#databases) are kept; it prints how to delete the database.
+
+### Project Setup
+
+A project lists the settings it needs on a server in a `setup.conf` at the top of its repository, so it can be added and deployed without editing anything by hand. Each line names an env file in the repository, a variable in it, and where its value comes from:
+
+```text
+# <env file> <variable> <value>
+php.env DB_HOST        database host
+php.env DB_DATABASE    database name
+php.env DB_USERNAME    database user
+php.env DB_PASSWORD    database password
+php.env SITE_URL       domain
+php.env APP_KEY        random base64 32
+php.env SMTP_HOST      ask SMTP server
+php.env SMTP_PASSWORD  secret SMTP password
+```
+
+| Value | Filled in with |
+|-------|----------------|
+| `database host`, `port`, `name`, `user`, `password` | The project's database on the [shared database](#databases): `shared-mariadb`, `3306`, its database name, which is also its user, and its password. Any of these gives the project a database, adding a `DATABASE_PASSWORD` to its config file. |
+| `domain`, `url` | The project's first domain, such as `glitch.wetfish.net`, or its `https://` URL |
+| `random hex <bytes>`, `random base64 <bytes>` | A random secret of 8 to 256 bytes, as hex or base64 |
+| `ask <text>` | A value asked for with the text, offering the value in the env file's example as the default |
+| `secret <text>` | A value asked for with the text, without showing what is typed. It can be left empty. |
+
+Each env file starts as a copy of the repository's `<file>.example`, such as `php.env.example`, if it has one, so settings that need no server value keep their example values. Env files must not be tracked in the repository, and values cannot contain a single quote. Values that aren't plain letters, numbers, and punctuation such as `.@:/+=-` are written in single quotes, which Compose reads literally.
+
+The files are kept in `config/<name>/`, readable only by their owner, so moving to a new server with a copy of `config/` brings them along. Each deploy copies them into the project's clone, where its Compose file reads them, and never through a symbolic link in the repository or over a tracked file.
+
+Values already in a file are kept, except those filled in from the server's settings, which every deploy writes again, so changing a project's domains or database password and deploying updates them. To change another value, edit the file in `config/<name>/` and deploy again. When a newer `setup.conf` asks for a value that can be generated, the next deploy adds it. One that has to be entered by hand stops the deploy, with the old containers still running, until it is entered:
+
+```bash
+./configure-project.sh glitch
+./deploy.sh glitch
+```
+
+`configure-project.sh` asks only for the values that are missing. Without a terminal, such as when adding a project unattended, values that have to be entered by hand are an error, and the project is not added.
 
 ### Configuration Files
 
@@ -132,7 +169,7 @@ The shared pages are in `caddy/pages/`. A project can show its own instead by ad
 
 ### Databases
 
-Projects can share one database server, `shared-mariadb`, rather than each running its own, which matters on a small server. Each project that uses it gets its own database and user, both named after the project with `_` in place of `-` (`old-wiki` becomes `old_wiki`), and the user can reach only that database. A project uses it when its config file has a `DATABASE_PASSWORD`, the password of its user:
+Projects can share one database server, `shared-mariadb`, rather than each running its own, which matters on a small server. Each project that uses it gets its own database and user, both named after the project with `_` in place of `-` (`old-wiki` becomes `old_wiki`), and the user can reach only that database. A project uses it when its config file has a `DATABASE_PASSWORD`, the password of its user. Adding a project whose [setup.conf](#project-setup) asks for the database adds one; for another project, add it yourself:
 
 ```bash
 echo "DATABASE_PASSWORD=$(openssl rand -hex 24)" >> config/glitch.conf
@@ -164,14 +201,15 @@ Removing a project keeps its database, and prints the SQL that deletes it.
 `./deploy.sh <name>` deploys a project:
 
 1. Clones its repository into `projects/<name>` the first time, then fetches the latest commit of its branch and checks it out. Changes to tracked files in the clone are discarded; untracked files, such as the project's own `.env`, are kept. The running containers never read the clone, so this changes nothing on the site.
-2. Writes `generated/projects/<name>/compose.server.yml`, which connects the project's web service to the shared `web` network as `<name>-<service>`, and tags each image the project builds with the commit (see [Images](#images)). Nothing else in the project joins the shared network, so projects cannot reach each other's databases. If the project uses the [shared database](#databases), the file also connects its services to the project's database network.
-3. Refuses to deploy if the project mounts files tracked in its repository into a container (see [Images](#images)).
-4. If the project uses the [shared database](#databases), starts the database if it isn't running, connects it to the project's network, and creates the project's database and user. If this fails, the old containers keep running.
-5. Pulls the images the project doesn't build, if they are missing, and builds the rest, while the old containers keep serving the site. If either fails, the old containers keep running.
-6. Copies the project's own [maintenance pages](#maintenance-pages) from the commit, if it has any, and turns on the updating page. Then it replaces the containers with `docker compose up --no-build`, using the project's Compose file and the generated one. The Compose project is named after the project. While the containers are replaced, visitors who reach the site see the updating page.
-7. Waits up to 5 minutes until every container is running and passes its health check, if it has one. A container that exits on its own with status 0, such as a one-off migration, counts as done. Then it turns the updating page off. If a container is unhealthy or exits with an error, the deploy fails and prints the command to [roll back](#rolling-back).
-8. Records the commit in `generated/projects/<name>/releases`, and removes the images of all but the three newest releases.
-9. Deploys again if more commits were pushed in the meantime.
+2. Fills in any values the commit's [setup.conf](#project-setup) asks for that can be generated, and copies the project's env files from `config/<name>/` into the clone. If a value has to be entered by hand, the deploy stops, and the old containers keep running.
+3. Writes `generated/projects/<name>/compose.server.yml`, which connects the project's web service to the shared `web` network as `<name>-<service>`, and tags each image the project builds with the commit (see [Images](#images)). Nothing else in the project joins the shared network, so projects cannot reach each other's databases. If the project uses the [shared database](#databases), the file also connects its services to the project's database network.
+4. Refuses to deploy if the project mounts files tracked in its repository into a container (see [Images](#images)).
+5. If the project uses the [shared database](#databases), starts the database if it isn't running, connects it to the project's network, and creates the project's database and user. If this fails, the old containers keep running.
+6. Pulls the images the project doesn't build, if they are missing, and builds the rest, while the old containers keep serving the site. If either fails, the old containers keep running.
+7. Copies the project's own [maintenance pages](#maintenance-pages) from the commit, if it has any, and turns on the updating page. Then it replaces the containers with `docker compose up --no-build`, using the project's Compose file and the generated one. The Compose project is named after the project. While the containers are replaced, visitors who reach the site see the updating page.
+8. Waits up to 5 minutes until every container is running and passes its health check, if it has one. A container that exits on its own with status 0, such as a one-off migration, counts as done. Then it turns the updating page off. If a container is unhealthy or exits with an error, the deploy fails and prints the command to [roll back](#rolling-back).
+9. Records the commit in `generated/projects/<name>/releases`, and removes the images of all but the three newest releases.
+10. Deploys again if more commits were pushed in the meantime.
 
 Two deploys of the same project never overlap. On a server, the webhook starts them: `project-deploy@<name>.path` sees the project's trigger file change and starts `project-deploy@<name>.service`, which runs `deploy.sh` as root.
 
@@ -220,6 +258,7 @@ A project's repository needs a few things to run on a server:
 | Exact versions for base images, such as `php:8.4.27-fpm-alpine` | Deploys build with Docker's cache and never pull newer images, so a new version is a reviewed commit |
 | Optionally, its own `maintenance/updating.html` and `maintenance/unavailable.html`, each self-contained | Caddy shows them instead of the shared [maintenance pages](#maintenance-pages) |
 | Code built into the images, never mounted from the repository; put mounts for local development in `docker-compose.override.yml` | Servers run each project only from images built from one commit, and deploys refuse tracked files mounted into a container (see [Images](#images)) |
+| A `setup.conf`, if it needs env files with secrets or settings for this server (see [Project Setup](#project-setup)) | Projects are added and deployed without editing files on the server by hand |
 | A `.dockerignore` that leaves out `.git` and every `.env` file | Secrets reach containers at run time, through `env_file` or a read-only mount of an untracked file, never inside an image |
 | A database, if it needs one, from the [shared database](#databases) on servers: `shared-mariadb` on port 3306, with the project's database name, user, and password. A database service for local development belongs in `docker-compose.override.yml`. | Projects share one database server rather than each running their own |
 | A `healthcheck` on long-running services, especially the web service | Deploys wait for the new containers to pass it, and fail if one doesn't |
@@ -267,7 +306,7 @@ Each server has three kinds of files that are never committed:
 
 | Where | Written by | Contents |
 |-------|------------|----------|
-| `.env` and `config/` | Setup, `add-project.sh`, or you | What this server is and which projects it runs |
+| `.env` and `config/` | Setup, `add-project.sh`, `configure-project.sh`, or you | What this server is, which projects it runs, and their env files |
 | `generated/` | The scripts | Everything derived from those settings. Never edit it by hand: change `.env` or `config/` and run `apply.sh` instead. |
 | `projects/` | Deploys | One clone per project |
 
@@ -280,7 +319,7 @@ Each server has three kinds of files that are never committed:
 | `UID`, `GID` | The user the webhook container runs as, so it can write trigger files: `deploy` on a server, or you in a local copy |
 | `MARIADB_ROOT_PASSWORD` | The root password of the [shared database](#databases), generated by setup. The database keeps the password it was created with, so never change it. |
 
-`config/` holds one `<name>.conf` per project; see [Configuration Files](#configuration-files).
+`config/` holds one `<name>.conf` per project, and in `config/<name>/` the env files of each project with a `setup.conf`; see [Configuration Files](#configuration-files) and [Project Setup](#project-setup).
 
 `generated/`, written by the scripts. Running setup again recreates all of it except Cloudflare-only mode's allowlist:
 

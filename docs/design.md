@@ -20,6 +20,8 @@ Each choice favors what a small community can afford and understand.
 
 **Projects plug in with plain Compose.** A project needs only a Compose file with a web service. The server connects that one service to its shared network itself, so the same file runs on a laptop and on a server, and projects stay unaware of each other.
 
+**Projects declare their setup; the server does it.** A project lists the settings it needs in `setup.conf`, and adding it generates the secrets, fills in its database and domain, and asks only for what a person has to enter, such as SMTP credentials, so its first deploy never fails for want of a setting. Nothing from a project's repository runs on the server outside its containers, which matters when other organizations' projects share it. The values are kept in `config/`, so they move to a new server with it.
+
 **One database server, a database per project.** Running a database for every project would cost each one memory a small server doesn't have, so projects that need one share a single MariaDB, each with its own database and a user that can reach only it. The database joins a separate network for each project rather than one they all share, so a project can reach the database but never another project's containers. It runs only on servers that need it, and an LTS release keeps upgrades rare.
 
 **Shared containers are named apart.** Containers from this repository are named `shared-<service>`, and a project's containers are named after the project (`wiki-app`, `wiki-nginx`), so `docker ps` shows what belongs to whom.

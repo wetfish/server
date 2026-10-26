@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
 # Adds a project to this server: writes config/<name>.conf with a new
-# webhook secret, applies the configuration, deploys the project, and prints
-# the webhook to add in GitHub. Run from the clone, as root on a server or as
-# yourself on your own computer:
+# webhook secret, sets up the env files its setup.conf asks for, applies the
+# configuration, deploys the project, and prints the webhook to add in
+# GitHub. Run from the clone, as root on a server or as yourself on your own
+# computer:
 #
 #   ./add-project.sh --name glitch --repo https://github.com/wetfish/glitch.git --domain stage-glitch.wetfish.net
 #   ./add-project.sh      # asks for anything not given
@@ -49,6 +50,9 @@ Usage: ./add-project.sh [options]
 
 The name, repository, and domains are asked for if not given. Without a
 terminal to ask on, they are required.
+
+Then the values the project's setup.conf asks for are generated or asked
+for, so a project whose setup.conf asks for any by hand needs a terminal.
 EOF
 }
 
@@ -153,11 +157,23 @@ choose_settings() {
     [[ -n "$DOMAINS" ]] || fail "a project needs at least one domain"
 }
 
-# Writes the config file. apply.sh checks it along with every other
-# project's; if it refuses, the file is removed again, so a failed add
-# leaves the server as it was.
+# Removes what an add that didn't finish wrote, so the server is left as it
+# was. The clone in projects/<name>, if one was made, is kept; adding the
+# project again reuses it.
+remove_partial() {
+    if [[ "$ADDED" != true && -n "$CONFIG_FILE" ]]; then
+        rm -rf "$CONFIG_FILE" "$INSTALL_DIR/config/$NAME"
+    fi
+}
+
+# Writes the config file, then sets up the project's env files, asking for
+# any values its setup.conf needs. apply.sh checks the config file along
+# with every other project's. If anything fails, or the add is interrupted,
+# both are removed again, so a failed add leaves the server as it was.
 add_project() {
     info "Adding $NAME"
+    ADDED=false
+    trap remove_partial EXIT
 
     mkdir -p "$INSTALL_DIR/config"
     chmod 700 "$INSTALL_DIR/config"
@@ -174,10 +190,12 @@ add_project() {
         } > "$CONFIG_FILE"
     )
 
-    if ! "$INSTALL_DIR/apply.sh"; then
-        rm -f "$CONFIG_FILE"
-        fail "$NAME was not added"
-    fi
+    echo
+    "$INSTALL_DIR/configure-project.sh" "$NAME" || fail "$NAME was not added"
+
+    echo
+    "$INSTALL_DIR/apply.sh" || fail "$NAME was not added"
+    ADDED=true
 }
 
 # The project stays added if its first deploy fails, so the problem can be
@@ -198,7 +216,8 @@ print_webhook() {
     cat << EOF
 
 ==============================================================================
-Added $NAME. Its settings are in config/$NAME.conf.
+Added $NAME. Its settings are in config/$NAME.conf, and its env files, if it
+has any, in config/$NAME/.
 
 Add a webhook in GitHub (the repository's Settings → Webhooks → Add webhook):
 
