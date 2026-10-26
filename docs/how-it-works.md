@@ -91,6 +91,9 @@ php.env SITE_URL       domain
 php.env APP_KEY        random base64 32
 php.env SMTP_HOST      ask SMTP server
 php.env SMTP_PASSWORD  secret SMTP password
+
+# SQL that creates the project's tables in its new database
+schema schema.sql
 ```
 
 | Value | Filled in with |
@@ -100,6 +103,8 @@ php.env SMTP_PASSWORD  secret SMTP password
 | `random hex <bytes>`, `random base64 <bytes>` | A random secret of 8 to 256 bytes, as hex or base64 |
 | `ask <text>` | A value asked for with the text, offering the value in the env file's example as the default |
 | `secret <text>` | A value asked for with the text, without showing what is typed. It can be left empty. |
+
+A `schema <file>` line names a SQL file in the repository that creates the project's tables. It runs once, when a deploy first creates the project's [database](#databases), and never again, so changes to it later don't reach an existing database. It also gives the project a database. To start a project's local database the same way, mount the file into the database image's `/docker-entrypoint-initdb.d/` in `docker-compose.override.yml`, which runs it only while the database is empty.
 
 Each env file starts as a copy of the repository's `<file>.example`, such as `php.env.example`, if it has one, so settings that need no server value keep their example values. Env files must not be tracked in the repository, and values cannot contain a single quote. Values that aren't plain letters, numbers, and punctuation such as `.@:/+=-` are written in single quotes, which Compose reads literally.
 
@@ -182,6 +187,7 @@ Each deploy of such a project prepares its database before building anything:
 - The database starts if it isn't running, the first time with the root password setup generated as `MARIADB_ROOT_PASSWORD` in `.env`. A server without such a project never runs it.
 - Its network, `<name>-database`, is created, and the database is connected to it. Every service of the project joins it, and reaches the database there as `shared-mariadb` on port 3306. Only this project's containers are on the network, so no project can reach another's containers through the database. The network is internal, so nothing on it reaches the internet.
 - The project's database and user are created if they don't exist yet, and the user's password is set to the one in the config file, so changing it there and deploying changes it.
+- If the deploy just created the database, and the project's `setup.conf` names a [schema](#project-setup), it runs in the new database, as the project's own user, so it can change nothing outside that database. A database that already exists is never touched, so a schema never runs against existing data, whatever it contains. If the schema fails, the new database is dropped again, and the deploy stops with the old containers still running, so the next deploy starts over.
 
 Running setup again updates the database with the other shared services, if it is running, and connects it to each project's network again, since a replaced container loses them. Projects lose their connections to it for the few seconds that takes. A new MariaDB version upgrades the data files when it starts.
 

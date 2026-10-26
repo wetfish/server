@@ -14,10 +14,14 @@
 #
 # The scripts run these themselves:
 #
-#   ./database.sh prepare <project>   Starts the database if it isn't
+#   ./database.sh prepare <project> <commit>
+#                                     Starts the database if it isn't
 #                                     running, connects it to the project's
 #                                     network, and creates the project's
-#                                     database and user (deploy.sh)
+#                                     database and user. A database it has
+#                                     just created gets the tables of the
+#                                     schema the commit's setup.conf names.
+#                                     (deploy.sh)
 #   ./database.sh reconnect           Connects the database to every
 #                                     project's network again after its
 #                                     container is replaced (setup.sh)
@@ -47,7 +51,7 @@ fail() {
 
 usage() {
     echo "Usage: ./database.sh shell [<project>] | dump <project> | import <project>" >&2
-    echo "       ./database.sh prepare <project> | reconnect | disconnect <name>" >&2
+    echo "       ./database.sh prepare <project> <commit> | reconnect | disconnect <name>" >&2
     exit 1
 }
 
@@ -162,12 +166,54 @@ GRANT ALL PRIVILEGES ON \`$DATABASE\`.* TO '$DATABASE'@'%';
 EOF
 }
 
+database_exists() {
+    [[ -n "$(client mariadb --user=root --batch --skip-column-names \
+        --execute "SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = '$DATABASE'")" ]]
+}
+
+# Runs the schema file from the commit in the project's database, as the
+# project's own user, so it can change nothing outside that database. It
+# connects over TCP, as projects do, so the user's '%' host applies. The
+# password is sent on the first line of standard input, never on a command
+# line, and the shell reads only that line, leaving the SQL for mariadb.
+run_schema() {
+    {
+        echo "$PASSWORD"
+        git -C "$INSTALL_DIR/projects/$NAME" cat-file blob "$2:$1"
+    } | docker exec --interactive "$CONTAINER" \
+        sh -c 'read -r MYSQL_PWD && export MYSQL_PWD && exec mariadb --host=127.0.0.1 --user="$1" "$1"' sh "$DATABASE"
+}
+
+# Creates the project's tables only in a database this deploy created, so
+# a schema never runs against existing data, whatever it contains. If it
+# fails, the new database is dropped again, so the next deploy starts over
+# rather than finding a database without its tables.
 prepare() {
+    local schema="" created=false
+
     load_project "$1"
     start
     log "Connecting the shared database to $NAME's network"
     connect
+
+    # The schema is looked up before anything is created, so a problem with
+    # it never leaves a new database without its tables
+    if ! database_exists; then
+        created=true
+        schema="$("$INSTALL_DIR/configure-project.sh" --schema "$NAME" "$2")"
+    fi
+
     create_user
+
+    $created || return 0
+    log "Created $NAME's database"
+    [[ -n "$schema" ]] || return 0
+
+    log "Creating $NAME's tables from $schema"
+    if ! run_schema "$schema" "$2"; then
+        client mariadb --user=root --execute "DROP DATABASE \`$DATABASE\`"
+        fail "$schema failed in $NAME's new database, so the database was removed again"
+    fi
 }
 
 reconnect() {
@@ -224,7 +270,7 @@ main() {
             [[ ! -t 0 ]] || fail "pipe the SQL in: ./database.sh import $2 < dump.sql"
             client mariadb --user=root "$DATABASE"
             ;;
-        prepare:2) prepare "$2" ;;
+        prepare:3) prepare "$2" "$3" ;;
         reconnect:1) reconnect ;;
         disconnect:2) disconnect "$2" ;;
         *) usage ;;

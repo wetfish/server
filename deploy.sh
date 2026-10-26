@@ -403,9 +403,10 @@ deploy_commit() {
     check_mounts
 
     # Starts the shared database if needed, and creates the project's
-    # network, database, and user before its containers need them
+    # network, database, and user before its containers need them, with
+    # the tables of its schema if the database is new
     if [[ "$USES_DATABASE" == true ]]; then
-        "$INSTALL_DIR/database.sh" prepare "$NAME" \
+        "$INSTALL_DIR/database.sh" prepare "$NAME" "$COMMIT" \
             || fail "preparing $NAME's database failed; the running containers were left unchanged"
     fi
 

@@ -15,8 +15,10 @@
 #
 # Each deploy runs it as `--deploy <name> <commit>`, which never asks: it
 # fills in what it can generate, refuses if anything must be entered by
-# hand, and copies the files into the project's clone. See "Project Setup"
-# in docs/how-it-works.md.
+# hand, and copies the files into the project's clone. database.sh runs it
+# as `--schema <name> <commit>`, which prints the SQL file setup.conf names
+# for creating the project's tables. See "Project Setup" in
+# docs/how-it-works.md.
 
 set -euo pipefail
 
@@ -163,10 +165,21 @@ tracked() {
     [[ -n "$(git -C "$PROJECT_DIR" ls-tree "$COMMIT" -- "$1")" ]]
 }
 
+# Succeeds for a relative path of plain names, with no '.' or '..' parts
+plain_path() {
+    local part
+
+    [[ "$1" =~ $PATH_PATTERN ]] || return 1
+    for part in ${1//\// }; do
+        [[ "$part" != "." && "$part" != ".." ]] || return 1
+    done
+}
+
 # Reads setup.conf from the commit into the E_* lists, one entry per line:
 #
 #   <env file> <KEY> <how>
 #
+# and into SCHEMA_FILE the SQL file of a `schema <file>` line, if it has one.
 # Stops at the first problem, before anything is changed. A project without
 # setup.conf needs no setup.
 read_setup() {
@@ -175,10 +188,11 @@ read_setup() {
     E_KIND=()
     E_ARG=()
     USES_DATABASE=false
+    SCHEMA_FILE=""
 
     git -C "$PROJECT_DIR" cat-file -e "$COMMIT:$SETUP_FILE" 2> /dev/null || return 0
 
-    local line number=0 file key kind arg part label
+    local line number=0 file key kind arg label
     while IFS= read -r line || [[ -n "$line" ]]; do
         number=$((number + 1))
         [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
@@ -186,10 +200,20 @@ read_setup() {
 
         read -r file key kind arg <<< "$line"
 
-        [[ "$file" =~ $PATH_PATTERN ]] || fail "$label: '$file' is not a plain path inside the repository"
-        for part in ${file//\// }; do
-            [[ "$part" != "." && "$part" != ".." ]] || fail "$label: '$file' is not a plain path inside the repository"
-        done
+        # SQL that creates the project's tables, run once in its database
+        # when the server first creates it; see database.sh. It is read
+        # from the commit, so it must be a file in the repository.
+        if [[ "$file" == schema && -z "$kind" ]]; then
+            [[ -z "$SCHEMA_FILE" ]] || fail "$label: setup.conf can name only one schema"
+            plain_path "$key" || fail "$label: '$key' is not a plain path inside the repository"
+            git -C "$PROJECT_DIR" ls-tree "$COMMIT" -- "$key" | grep -qE '^100(644|755) blob ' \
+                || fail "$label: $key is not a file in the repository"
+            SCHEMA_FILE="$key"
+            USES_DATABASE=true
+            continue
+        fi
+
+        plain_path "$file" || fail "$label: '$file' is not a plain path inside the repository"
         ! tracked "$file" || fail "$label: $file is tracked in the repository; env files hold secrets, so they must not be"
         [[ "$key" =~ $KEY_PATTERN ]] || fail "$label: '$key' is not a valid variable name"
 
@@ -388,8 +412,8 @@ configure() {
     fetch
     read_setup
 
-    if [[ ${#E_KEY[@]} -eq 0 ]]; then
-        info "$NAME has no $SETUP_FILE, so it needs no setup"
+    if [[ ${#E_KEY[@]} -eq 0 && "$USES_DATABASE" != true ]]; then
+        info "$NAME has no $SETUP_FILE, or it asks for nothing, so it needs no setup"
         return
     fi
 
@@ -428,11 +452,22 @@ deploy() {
     install_files
 }
 
+# Run by database.sh, after creating the project's database: prints the
+# SQL file the commit's setup.conf names, or nothing
+schema() {
+    load_project "$1"
+    COMMIT="$(git -C "$PROJECT_DIR" rev-parse --verify "$2^{commit}")" || fail "$NAME has no commit $2"
+
+    read_setup
+    echo "$SCHEMA_FILE"
+}
+
 main() {
     check_system
 
     case "${1:-}:$#" in
         --deploy:3) deploy "$2" "$3" ;;
+        --schema:3) schema "$2" "$3" ;;
         -*) usage ;;
         *:1) configure "$1" ;;
         *) usage ;;
