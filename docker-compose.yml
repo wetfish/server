@@ -1,4 +1,4 @@
-# Shared services that run once per server, in front of every project on it.
+# Shared services that run once per server, for every project on it.
 # Settings come from the root .env; copy it from .env.example.
 #
 # Projects run from their own clones with their own docker-compose.yml. A
@@ -54,6 +54,32 @@ services:
     networks:
       - web
 
+  # The database that projects on this server share, each with its own
+  # database and user. It starts the first time a project that uses it is
+  # deployed, so a server without one never runs it. database.sh connects it
+  # to each such project's own network, <project>-database, where the project
+  # reaches it as shared-mariadb; it is on no network that projects share.
+  mariadb:
+    image: mariadb:12.3.3
+    container_name: shared-mariadb
+    restart: unless-stopped
+    profiles:
+      - database
+    environment:
+      # Only used when the database is first created; see .env.example
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-}
+      # Upgrades the data files after a new MariaDB version starts
+      MARIADB_AUTO_UPGRADE: "1"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 1m
+      start_interval: 2s
+
 networks:
   # Fixed name, so project compose files can join it as an external network
   web:
@@ -62,3 +88,4 @@ networks:
 volumes:
   caddy_data:
   caddy_config:
+  mariadb_data:

@@ -2,9 +2,9 @@
 #
 # Removes a project from this server: stops its containers, deletes
 # config/<name>.conf, and applies the configuration, so Caddy stops serving
-# its domains and its webhook is gone. Its clone in projects/<name> and its
-# Docker volumes are kept. Run from the clone, as root on a server or as
-# yourself on your own computer:
+# its domains and its webhook is gone. Its clone in projects/<name>, its
+# Docker volumes, and its database on the shared database are kept. Run from
+# the clone, as root on a server or as yourself on your own computer:
 #
 #   ./remove-project.sh glitch
 #   ./remove-project.sh glitch --yes    # without asking to confirm
@@ -44,11 +44,15 @@ main() {
 
     [[ -n "$name" ]] || usage
 
-    local install_dir config_file reply
+    local install_dir config_file reply uses_database=false
     install_dir="$(cd "$(dirname "$0")" && pwd)"
     config_file="$install_dir/config/$name.conf"
 
     [[ "$name" =~ ^[a-z][a-z0-9-]*$ && -f "$config_file" ]] || fail "$name is not on this server (no config/$name.conf)"
+
+    if grep -qE '^DATABASE_PASSWORD=.' "$config_file"; then
+        uses_database=true
+    fi
 
     if ! $confirmed; then
         [[ -t 0 ]] || fail "pass --yes to remove $name without a terminal to confirm on"
@@ -72,6 +76,7 @@ main() {
 
     info "Stopping $name's containers"
     docker compose --project-name "$name" down --remove-orphans
+    "$install_dir/database.sh" disconnect "$name"
     rm -rf "$install_dir/generated/projects/$name" "$install_dir/generated/maintenance/$name"
 
     echo
@@ -79,6 +84,15 @@ main() {
     if [[ -d "$install_dir/projects/$name" ]]; then
         echo "Its clone in projects/$name and its Docker volumes are kept; delete them if"
         echo "nothing in them is needed."
+    fi
+
+    if $uses_database; then
+        local database="${name//-/_}"
+        echo
+        echo "Its database on shared-mariadb is kept too. To delete it, run"
+        echo "./database.sh shell and enter:"
+        echo
+        echo "  DROP DATABASE \`$database\`; DROP USER '$database'@'%';"
     fi
 }
 

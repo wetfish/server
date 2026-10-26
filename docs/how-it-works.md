@@ -4,14 +4,15 @@ On a server, every command here runs as root. On your own computer, the same com
 
 ## Shared Services
 
-Every server runs two containers from this repository's `docker-compose.yml`:
+Every server runs these containers from this repository's `docker-compose.yml`:
 
 | Container | Purpose |
 |-----------|---------|
 | `shared-caddy` | Terminates HTTPS on ports 80 and 443 for the server's own hostname and every project's domains, obtaining certificates automatically, and shows a [maintenance page](#maintenance-pages) when a project can't answer. `caddy/Caddyfile` imports the configuration the scripts write to `generated/caddy/`. |
 | `shared-webhook` | Receives GitHub push webhooks at `/hooks/<project>`. A request signed with that project's secret, for a push to the branch the server deploys, writes the project's trigger file in `generated/triggers/`. It has no Docker access. |
+| `shared-mariadb` | The [shared database](#databases), MariaDB 12.3 LTS, holding a database for each project that uses one. It starts the first time such a project is deployed, so a server without one never runs it. |
 
-Both join the `web` Docker network, which each project's web service joins too. The Compose project is named `shared`, so its volumes are `shared_caddy_data` and `shared_caddy_config`.
+Caddy and the webhook listener join the `web` Docker network, which each project's web service joins too. The shared database is on no network that projects share; it joins each project's own database network instead. The Compose project is named `shared`, so its volumes are `shared_caddy_data`, `shared_caddy_config`, and `shared_mariadb_data`.
 
 The server's own hostname (`SERVER_HOSTNAME`, such as `stage.wetfish.net`) receives the webhooks for every project at `/hooks/`. Every other path goes to the project whose domains include the hostname, or, if none does, answers `OK` for checking that the server is up. It always sends `X-Robots-Tag: noindex, nofollow` so search engines leave it out.
 
@@ -21,11 +22,11 @@ The server's own hostname (`SERVER_HOSTNAME`, such as `stage.wetfish.net`) recei
 
 1. Clones this repository into `/srv/wetfish-server` when run by itself (piped from curl, or saved as a lone file), then continues with the clone's own copy of the script. Run from a clone, it uses that clone wherever it is.
 2. Asks for the server's hostname, whether it is a staging or production server, and whether to turn on [Cloudflare-only mode](cloudflare.md), before any long-running step.
-3. Installs git, curl, and jq, then Docker Engine and the Compose plugin from Docker's apt repository, and caps container logs at 100 MB each with Docker's `local` log driver, unless `/etc/docker/daemon.json` already exists.
+3. Installs git, curl, jq, and openssl, then Docker Engine and the Compose plugin from Docker's apt repository, and caps container logs at 100 MB each with Docker's `local` log driver, unless `/etc/docker/daemon.json` already exists.
 4. Adds a 1 GiB swap file if the server has less than 2 GiB of memory and no swap.
 5. Creates the `deploy` user, which has no password or login shell; the webhook listener runs as this user.
 6. Allows ports 80 and 443 in ufw, if ufw is active.
-7. Writes `.env`, creates `config/` and `generated/`, installs the systemd units that run [deploys](#deploys), applies the [project configuration](#projects), and builds and starts the shared services.
+7. Writes `.env`, generating the [shared database](#databases)'s root password the first time, creates `config/` and `generated/`, installs the systemd units that run [deploys](#deploys), applies the [project configuration](#projects), and builds and starts the shared services, including the shared database if it is already running.
 8. Turns on Cloudflare-only mode, if chosen.
 
 | Option | Effect |
@@ -74,7 +75,7 @@ Add a project with `add-project.sh`, which asks for anything not given as an opt
 
 It writes `config/<name>.conf` with a new webhook secret, applies the configuration, deploys the project for the first time, and prints the webhook to add in GitHub, under the repository's Settings → Webhooks: the payload URL, content type `application/json`, the secret, and only the push event. If the project cannot be added, for example because another project already uses one of its domains, nothing changes. If only its first deploy fails, the project stays added: fix the problem and run `./deploy.sh <name>`.
 
-Remove a project with `./remove-project.sh <name>`, which asks to confirm unless given `--yes`. It stops the project's containers; its domains stop being served and its webhook stops working, so delete the webhook in GitHub too. Its clone in `projects/<name>` and its Docker volumes are kept.
+Remove a project with `./remove-project.sh <name>`, which asks to confirm unless given `--yes`. It stops the project's containers; its domains stop being served and its webhook stops working, so delete the webhook in GitHub too. Its clone in `projects/<name>`, its Docker volumes, and its [database](#databases) are kept; it prints how to delete the database.
 
 ### Configuration Files
 
@@ -86,7 +87,7 @@ DOMAINS=stage-glitch.wetfish.net
 WEBHOOK_SECRET=3f9c...
 ```
 
-The other settings are `BRANCH`, `REDIRECTS`, and `UPSTREAM`, matching the options above. Domains are separated by spaces.
+The other settings are `BRANCH`, `REDIRECTS`, and `UPSTREAM`, matching the options above, and `DATABASE_PASSWORD`, which gives the project a [database](#databases). Domains are separated by spaces.
 
 To change a project, edit its file and run `./apply.sh`. It checks every file first and changes nothing if any has a problem. Then it:
 
@@ -129,18 +130,48 @@ When a project can't be reached, or its web service answers 502 or 504 (such as 
 
 The shared pages are in `caddy/pages/`. A project can show its own instead by adding `maintenance/updating.html`, `maintenance/unavailable.html`, or both to its repository; each deploy copies them from the deployed commit into `generated/maintenance/<name>/`, and a page the project doesn't have falls back to the shared one. A page must be self-contained, with its styles and images inline, since nothing else can be loaded while the site is down.
 
+### Databases
+
+Projects can share one database server, `shared-mariadb`, rather than each running its own, which matters on a small server. Each project that uses it gets its own database and user, both named after the project with `_` in place of `-` (`old-wiki` becomes `old_wiki`), and the user can reach only that database. A project uses it when its config file has a `DATABASE_PASSWORD`, the password of its user:
+
+```bash
+echo "DATABASE_PASSWORD=$(openssl rand -hex 24)" >> config/glitch.conf
+./apply.sh
+./deploy.sh glitch
+```
+
+Each deploy of such a project prepares its database before building anything:
+
+- The database starts if it isn't running, the first time with the root password setup generated as `MARIADB_ROOT_PASSWORD` in `.env`. A server without such a project never runs it.
+- Its network, `<name>-database`, is created, and the database is connected to it. Every service of the project joins it, and reaches the database there as `shared-mariadb` on port 3306. Only this project's containers are on the network, so no project can reach another's containers through the database. The network is internal, so nothing on it reaches the internet.
+- The project's database and user are created if they don't exist yet, and the user's password is set to the one in the config file, so changing it there and deploying changes it.
+
+Running setup again updates the database with the other shared services, if it is running, and connects it to each project's network again, since a replaced container loses them. Projects lose their connections to it for the few seconds that takes. A new MariaDB version upgrades the data files when it starts.
+
+`database.sh` works with the database by hand:
+
+| Command | Effect |
+|---------|--------|
+| `./database.sh shell` | Opens a MariaDB shell as root |
+| `./database.sh shell <name>` | Opens a MariaDB shell as root in the project's database |
+| `./database.sh dump <name> > <name>.sql` | Writes the project's database as SQL |
+| `./database.sh import <name> < <name>.sql` | Runs SQL in the project's database, such as a dump from another server |
+
+Removing a project keeps its database, and prints the SQL that deletes it.
+
 ## Deploys
 
 `./deploy.sh <name>` deploys a project:
 
 1. Clones its repository into `projects/<name>` the first time, then fetches the latest commit of its branch and checks it out. Changes to tracked files in the clone are discarded; untracked files, such as the project's own `.env`, are kept. The running containers never read the clone, so this changes nothing on the site.
-2. Writes `generated/projects/<name>/compose.server.yml`, which connects the project's web service to the shared `web` network as `<name>-<service>`, and tags each image the project builds with the commit (see [Images](#images)). Nothing else in the project joins the shared network, so projects cannot reach each other's databases.
+2. Writes `generated/projects/<name>/compose.server.yml`, which connects the project's web service to the shared `web` network as `<name>-<service>`, and tags each image the project builds with the commit (see [Images](#images)). Nothing else in the project joins the shared network, so projects cannot reach each other's databases. If the project uses the [shared database](#databases), the file also connects its services to the project's database network.
 3. Refuses to deploy if the project mounts files tracked in its repository into a container (see [Images](#images)).
-4. Pulls the images the project doesn't build, if they are missing, and builds the rest, while the old containers keep serving the site. If either fails, the old containers keep running.
-5. Copies the project's own [maintenance pages](#maintenance-pages) from the commit, if it has any, and turns on the updating page. Then it replaces the containers with `docker compose up --no-build`, using the project's Compose file and the generated one. The Compose project is named after the project. While the containers are replaced, visitors who reach the site see the updating page.
-6. Waits up to 5 minutes until every container is running and passes its health check, if it has one. A container that exits on its own with status 0, such as a one-off migration, counts as done. Then it turns the updating page off. If a container is unhealthy or exits with an error, the deploy fails and prints the command to [roll back](#rolling-back).
-7. Records the commit in `generated/projects/<name>/releases`, and removes the images of all but the three newest releases.
-8. Deploys again if more commits were pushed in the meantime.
+4. If the project uses the [shared database](#databases), starts the database if it isn't running, connects it to the project's network, and creates the project's database and user. If this fails, the old containers keep running.
+5. Pulls the images the project doesn't build, if they are missing, and builds the rest, while the old containers keep serving the site. If either fails, the old containers keep running.
+6. Copies the project's own [maintenance pages](#maintenance-pages) from the commit, if it has any, and turns on the updating page. Then it replaces the containers with `docker compose up --no-build`, using the project's Compose file and the generated one. The Compose project is named after the project. While the containers are replaced, visitors who reach the site see the updating page.
+7. Waits up to 5 minutes until every container is running and passes its health check, if it has one. A container that exits on its own with status 0, such as a one-off migration, counts as done. Then it turns the updating page off. If a container is unhealthy or exits with an error, the deploy fails and prints the command to [roll back](#rolling-back).
+8. Records the commit in `generated/projects/<name>/releases`, and removes the images of all but the three newest releases.
+9. Deploys again if more commits were pushed in the meantime.
 
 Two deploys of the same project never overlap. On a server, the webhook starts them: `project-deploy@<name>.path` sees the project's trigger file change and starts `project-deploy@<name>.service`, which runs `deploy.sh` as root.
 
@@ -190,6 +221,7 @@ A project's repository needs a few things to run on a server:
 | Optionally, its own `maintenance/updating.html` and `maintenance/unavailable.html`, each self-contained | Caddy shows them instead of the shared [maintenance pages](#maintenance-pages) |
 | Code built into the images, never mounted from the repository; put mounts for local development in `docker-compose.override.yml` | Servers run each project only from images built from one commit, and deploys refuse tracked files mounted into a container (see [Images](#images)) |
 | A `.dockerignore` that leaves out `.git` and every `.env` file | Secrets reach containers at run time, through `env_file` or a read-only mount of an untracked file, never inside an image |
+| A database, if it needs one, from the [shared database](#databases) on servers: `shared-mariadb` on port 3306, with the project's database name, user, and password. A database service for local development belongs in `docker-compose.override.yml`. | Projects share one database server rather than each running their own |
 | A `healthcheck` on long-running services, especially the web service | Deploys wait for the new containers to pass it, and fail if one doesn't |
 | nginx looking up the PHP service through Docker's DNS every few seconds, as below | A deploy can replace the PHP container, which changes its address; nginx otherwise keeps the address it found when it started |
 
@@ -246,6 +278,7 @@ Each server has three kinds of files that are never committed:
 | `SERVER_HOSTNAME` | The server's own hostname. Its DNS record must point at the server before Caddy can obtain its certificate. |
 | `SERVER_ENVIRONMENT` | `staging` or `production` |
 | `UID`, `GID` | The user the webhook container runs as, so it can write trigger files: `deploy` on a server, or you in a local copy |
+| `MARIADB_ROOT_PASSWORD` | The root password of the [shared database](#databases), generated by setup. The database keeps the password it was created with, so never change it. |
 
 `config/` holds one `<name>.conf` per project; see [Configuration Files](#configuration-files).
 

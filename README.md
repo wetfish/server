@@ -15,9 +15,10 @@ So we build systems that anyone can replicate. Everything here is open source an
 - Running any number of projects side by side behind one HTTPS proxy, each from its own repository.
 - Deploying a project within seconds of a push, through a webhook with its own secret. No build pipeline, container registry, or Kubernetes.
 - Running the same way on staging (each project's `main` branch) and production (`release`), and on separate servers for separate groups of projects.
+- Sharing one database server between the projects that need one, each with its own database.
 - Optionally accepting web traffic only through Cloudflare, which hides the server's address.
 
-**Status:** server setup, the shared proxy and webhook listener, adding and deploying projects, and Cloudflare-only mode work. Shared databases and backups are next.
+**Status:** server setup, the shared proxy and webhook listener, adding and deploying projects, the shared database, and Cloudflare-only mode work. Backups are next.
 
 ## Getting Started
 
@@ -37,7 +38,7 @@ To try it on your own computer first, clone the repository and run `./setup.sh` 
 
 ## Documentation
 
-- [How it works](docs/how-it-works.md): setup, adding and deploying projects, preparing a project, and files
+- [How it works](docs/how-it-works.md): setup, adding and deploying projects, databases, preparing a project, and files
 - [Cloudflare-only mode](docs/cloudflare.md): accepting web traffic only through Cloudflare
 - [Design decisions](docs/design.md): why it is built this way
 

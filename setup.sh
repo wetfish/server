@@ -307,6 +307,7 @@ check_local_docker() {
     docker info > /dev/null 2>&1 || fail "Docker is installed, but $(id -un) cannot use it; add yourself to the docker group, then log in again"
     docker compose version > /dev/null 2>&1 || fail "install the Docker Compose plugin first"
     command -v jq > /dev/null || fail "install jq first; deploys use it to read each project's Compose configuration"
+    command -v openssl > /dev/null || fail "install openssl first; setup and add-project.sh use it to generate secrets"
 }
 
 # --- Setup steps --------------------------------------------------------------
@@ -314,7 +315,7 @@ check_local_docker() {
 install_packages() {
     info "Installing required packages"
     apt-get update -qq
-    apt-get install -y -qq ca-certificates curl git jq > /dev/null
+    apt-get install -y -qq ca-certificates curl git jq openssl > /dev/null
 }
 
 # Builds can use more memory than a small server has. Adds a 1 GiB swap file
@@ -416,6 +417,12 @@ write_env() {
         set_env "$env_file" UID "$(id -u "$DEPLOY_USER")"
         set_env "$env_file" GID "$(id -g "$DEPLOY_USER")"
     fi
+
+    # Generated once and kept: the shared database keeps the root password
+    # it was created with
+    if [[ -z "$(env_value "$env_file" MARIADB_ROOT_PASSWORD)" ]]; then
+        set_env "$env_file" MARIADB_ROOT_PASSWORD "$(openssl rand -hex 32)"
+    fi
 }
 
 # The directories must exist before the containers start, or Docker creates
@@ -453,9 +460,21 @@ apply_projects() {
     "$INSTALL_DIR/apply.sh"
 }
 
+# The shared database starts the first time a project that uses it is
+# deployed. Once it exists, it is updated along with the other services, and
+# since a replaced container loses the networks database.sh connected it to,
+# those are connected again.
 start_services() {
+    local profiles=()
+
+    if docker container inspect shared-mariadb > /dev/null 2>&1; then
+        profiles=(--profile database)
+    fi
+
     info "Building and starting the shared services"
-    (cd "$INSTALL_DIR" && docker compose up --detach --build --remove-orphans)
+    (cd "$INSTALL_DIR" && docker compose "${profiles[@]}" up --detach --build --remove-orphans)
+
+    "$INSTALL_DIR/database.sh" reconnect
 }
 
 apply_cloudflare() {

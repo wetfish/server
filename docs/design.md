@@ -20,6 +20,8 @@ Each choice favors what a small community can afford and understand.
 
 **Projects plug in with plain Compose.** A project needs only a Compose file with a web service. The server connects that one service to its shared network itself, so the same file runs on a laptop and on a server, and projects stay unaware of each other.
 
+**One database server, a database per project.** Running a database for every project would cost each one memory a small server doesn't have, so projects that need one share a single MariaDB, each with its own database and a user that can reach only it. The database joins a separate network for each project rather than one they all share, so a project can reach the database but never another project's containers. It runs only on servers that need it, and an LTS release keeps upgrades rare.
+
 **Shared containers are named apart.** Containers from this repository are named `shared-<service>`, and a project's containers are named after the project (`wiki-app`, `wiki-nginx`), so `docker ps` shows what belongs to whom.
 
 **Maintenance pages, not held requests.** While a deploy replaces a project's containers, Caddy answers right away with a page saying the site is being updated, rather than holding requests until the new containers answer. A held request could reach the new site while a starting container is still running migrations against a shared database, so no visitor uses a site mid-switch.

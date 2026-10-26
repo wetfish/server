@@ -20,7 +20,10 @@ DOMAIN_PATTERN='^([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$'
 BRANCH_PATTERN='^[A-Za-z0-9._/-]+$'
 SECRET_PATTERN='^[A-Za-z0-9_-]{16,}$'
 UPSTREAM_PATTERN='^[a-z0-9][a-z0-9_.-]*:[0-9]+$'
-KEYS_PATTERN='^(REPO|BRANCH|DOMAINS|REDIRECTS|UPSTREAM|WEBHOOK_SECRET)='
+# The shared database's password for the project, which its user needs to
+# log in. Letters and numbers only, so SQL needs no escaping.
+DATABASE_PASSWORD_PATTERN='^[A-Za-z0-9]{16,}$'
+KEYS_PATTERN='^(REPO|BRANCH|DOMAINS|REDIRECTS|UPSTREAM|WEBHOOK_SECRET|DATABASE_PASSWORD)='
 
 # All work happens in functions called from the last line, so a `git pull`
 # that changes this file cannot affect a run in progress.
@@ -76,7 +79,7 @@ check_system() {
 # P_* maps. Stops at the first problem, before anything is changed.
 load_projects() {
     PROJECTS=()
-    declare -gA P_BRANCH=() P_DOMAINS=() P_REDIRECTS=() P_UPSTREAM=() P_SECRET=()
+    declare -gA P_BRANCH=() P_DOMAINS=() P_REDIRECTS=() P_UPSTREAM=() P_SECRET=() P_DATABASE=()
 
     # Which project claims each domain, so no two can share one
     local -A claimed=()
@@ -95,16 +98,17 @@ load_projects() {
         while IFS= read -r line || [[ -n "$line" ]]; do
             number=$((number + 1))
             [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
-            [[ "$line" =~ $KEYS_PATTERN ]] || fail "$label, line $number: expected REPO, BRANCH, DOMAINS, REDIRECTS, UPSTREAM, or WEBHOOK_SECRET, followed by '='"
+            [[ "$line" =~ $KEYS_PATTERN ]] || fail "$label, line $number: expected REPO, BRANCH, DOMAINS, REDIRECTS, UPSTREAM, WEBHOOK_SECRET, or DATABASE_PASSWORD, followed by '='"
         done < "$file"
 
-        local repo branch domains redirects upstream secret
+        local repo branch domains redirects upstream secret database_password
         repo="$(file_value "$file" REPO)"
         branch="$(file_value "$file" BRANCH)"
         domains="$(file_value "$file" DOMAINS)"
         redirects="$(file_value "$file" REDIRECTS)"
         upstream="$(file_value "$file" UPSTREAM)"
         secret="$(file_value "$file" WEBHOOK_SECRET)"
+        database_password="$(file_value "$file" DATABASE_PASSWORD)"
 
         [[ -n "$repo" ]] || fail "$label: REPO is missing"
         [[ -n "$domains" ]] || fail "$label: DOMAINS is missing"
@@ -116,6 +120,7 @@ load_projects() {
         [[ "$branch" =~ $BRANCH_PATTERN ]] || fail "$label: '$branch' is not a valid BRANCH"
         [[ "$upstream" =~ $UPSTREAM_PATTERN ]] || fail "$label: UPSTREAM must look like <service>:<port>, such as nginx:80"
         [[ "$secret" =~ $SECRET_PATTERN ]] || fail "$label: WEBHOOK_SECRET must be at least 16 letters, numbers, '-', or '_'; generate one with: openssl rand -hex 32"
+        [[ -z "$database_password" || "$database_password" =~ $DATABASE_PASSWORD_PATTERN ]] || fail "$label: DATABASE_PASSWORD must be at least 16 letters and numbers; generate one with: openssl rand -hex 24"
 
         for domain in $domains $redirects; do
             [[ "$domain" =~ $DOMAIN_PATTERN || "$domain" == "$SERVER_HOSTNAME" ]] || fail "$label: '$domain' is not a valid domain"
@@ -135,6 +140,10 @@ load_projects() {
         # shared web network
         P_UPSTREAM[$name]="$name-$upstream"
         P_SECRET[$name]="$secret"
+        # The project's database and user on the shared database, named
+        # with '_' rather than '-' as database.sh does
+        P_DATABASE[$name]=""
+        [[ -z "$database_password" ]] || P_DATABASE[$name]="${name//-/_}"
     done
     shopt -u nullglob
 }
@@ -360,6 +369,7 @@ print_summary() {
         echo "      Domains:  ${P_DOMAINS[$name]}"
         [[ -z "${P_REDIRECTS[$name]}" ]] || echo "      Redirects: ${P_REDIRECTS[$name]}"
         echo "      Webhook:  https://$SERVER_HOSTNAME/hooks/$name"
+        [[ -z "${P_DATABASE[$name]}" ]] || echo "      Database: ${P_DATABASE[$name]} on shared-mariadb"
     done
 
     if ! deploys_automatic; then
