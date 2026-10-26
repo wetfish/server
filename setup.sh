@@ -306,6 +306,7 @@ check_local_docker() {
     command -v docker > /dev/null || fail "install Docker first; setup only installs it on a server, as root"
     docker info > /dev/null 2>&1 || fail "Docker is installed, but $(id -un) cannot use it; add yourself to the docker group, then log in again"
     docker compose version > /dev/null 2>&1 || fail "install the Docker Compose plugin first"
+    command -v jq > /dev/null || fail "install jq first; deploys use it to read each project's Compose configuration"
 }
 
 # --- Setup steps --------------------------------------------------------------
@@ -313,7 +314,7 @@ check_local_docker() {
 install_packages() {
     info "Installing required packages"
     apt-get update -qq
-    apt-get install -y -qq ca-certificates curl git > /dev/null
+    apt-get install -y -qq ca-certificates curl git jq > /dev/null
 }
 
 # Builds can use more memory than a small server has. Adds a 1 GiB swap file
@@ -421,7 +422,7 @@ write_env() {
 # them owned by root. The webhook writes the trigger files. config/ holds the
 # projects' webhook secrets.
 create_dirs() {
-    mkdir -p "$INSTALL_DIR"/generated/{caddy/global,caddy/sites,caddy/hostname,webhook,triggers}
+    mkdir -p "$INSTALL_DIR"/generated/{caddy/global,caddy/sites,caddy/hostname,webhook,triggers,maintenance}
     $LOCAL || chown "$DEPLOY_USER:$DEPLOY_USER" "$INSTALL_DIR/generated/triggers"
 
     mkdir -p "$INSTALL_DIR/config"

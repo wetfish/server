@@ -30,6 +30,10 @@ services:
     volumes:
       - ./caddy:/etc/caddy:ro
       - ./generated/caddy:/etc/caddy-generated:ro
+      # Maintenance pages: the shared ones, and each project's own with the
+      # flag deploys write while they replace its containers
+      - ./caddy/pages:/srv/pages/default:ro
+      - ./generated/maintenance:/srv/pages/projects:ro
       - caddy_data:/data
       - caddy_config:/config
     networks:

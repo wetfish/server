@@ -72,7 +72,7 @@ main() {
 
     info "Stopping $name's containers"
     docker compose --project-name "$name" down --remove-orphans
-    rm -rf "$install_dir/generated/projects/$name"
+    rm -rf "$install_dir/generated/projects/$name" "$install_dir/generated/maintenance/$name"
 
     echo
     echo "Removed $name. Delete its webhook in GitHub (the repository's Settings → Webhooks)."
