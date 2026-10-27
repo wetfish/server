@@ -17,9 +17,10 @@ So we build systems that anyone can replicate. Everything here is open source an
 - Running the same way on staging (each project's `main` branch) and production (`release`), and on separate servers for separate groups of projects.
 - Adding a project in one command: its secrets are generated, and only what a person has to enter, such as SMTP credentials, is asked for.
 - Sharing one database server between the projects that need one, each with its own database.
+- Keeping large files, such as uploads, on a separately mounted file system, on the servers that need one.
 - Optionally accepting web traffic only through Cloudflare, which hides the server's address.
 
-**Status:** server setup, the shared proxy and webhook listener, adding and deploying projects, the shared database, and Cloudflare-only mode work. Backups are next.
+**Status:** server setup, the shared proxy and webhook listener, adding and deploying projects, the shared database, storage, and Cloudflare-only mode work. Backups are next.
 
 ## Getting Started
 
@@ -39,7 +40,7 @@ To try it on your own computer first, clone the repository and run `./setup.sh` 
 
 ## Documentation
 
-- [How it works](docs/how-it-works.md): setup, adding and setting up projects, databases, deploys, preparing a project, and files
+- [How it works](docs/how-it-works.md): setup, adding and setting up projects, databases, storage, deploys, preparing a project, and files
 - [Cloudflare-only mode](docs/cloudflare.md): accepting web traffic only through Cloudflare
 - [Design decisions](docs/design.md): why it is built this way
 

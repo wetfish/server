@@ -23,7 +23,14 @@ UPSTREAM_PATTERN='^[a-z0-9][a-z0-9_.-]*:[0-9]+$'
 # The shared database's password for the project, which its user needs to
 # log in. Letters and numbers only, so SQL needs no escaping.
 DATABASE_PASSWORD_PATTERN='^[A-Za-z0-9]{16,}$'
-KEYS_PATTERN='^(REPO|BRANCH|DOMAINS|REDIRECTS|UPSTREAM|WEBHOOK_SECRET|DATABASE_PASSWORD)='
+# Compose volume names, which also name each volume's directory on storage
+VOLUME_PATTERN='^[a-zA-Z0-9][a-zA-Z0-9_.-]*$'
+KEYS_PATTERN='^(REPO|BRANCH|DOMAINS|REDIRECTS|UPSTREAM|WEBHOOK_SECRET|DATABASE_PASSWORD|VOLUMES)='
+
+# Where the server's storage is mounted, and the file naming the machine
+# that claimed a server's directory there; see storage.sh
+STORAGE_ROOT="/mnt/virtual"
+CLAIM_FILE=".wetfish-server"
 
 # All work happens in functions called from the last line, so a `git pull`
 # that changes this file cannot affect a run in progress.
@@ -79,11 +86,11 @@ check_system() {
 # P_* maps. Stops at the first problem, before anything is changed.
 load_projects() {
     PROJECTS=()
-    declare -gA P_BRANCH=() P_DOMAINS=() P_REDIRECTS=() P_UPSTREAM=() P_SECRET=() P_DATABASE=()
+    declare -gA P_BRANCH=() P_DOMAINS=() P_REDIRECTS=() P_UPSTREAM=() P_SECRET=() P_DATABASE=() P_VOLUMES=()
 
     # Which project claims each domain, so no two can share one
-    local -A claimed=()
-    local file name label line number domain
+    local -A claimed=() listed=()
+    local file name label line number domain volume
 
     shopt -s nullglob
     for file in "$CONFIG_DIR"/*.conf; do
@@ -98,10 +105,10 @@ load_projects() {
         while IFS= read -r line || [[ -n "$line" ]]; do
             number=$((number + 1))
             [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
-            [[ "$line" =~ $KEYS_PATTERN ]] || fail "$label, line $number: expected REPO, BRANCH, DOMAINS, REDIRECTS, UPSTREAM, WEBHOOK_SECRET, or DATABASE_PASSWORD, followed by '='"
+            [[ "$line" =~ $KEYS_PATTERN ]] || fail "$label, line $number: expected REPO, BRANCH, DOMAINS, REDIRECTS, UPSTREAM, WEBHOOK_SECRET, DATABASE_PASSWORD, or VOLUMES, followed by '='"
         done < "$file"
 
-        local repo branch domains redirects upstream secret database_password
+        local repo branch domains redirects upstream secret database_password volumes
         repo="$(file_value "$file" REPO)"
         branch="$(file_value "$file" BRANCH)"
         domains="$(file_value "$file" DOMAINS)"
@@ -109,6 +116,7 @@ load_projects() {
         upstream="$(file_value "$file" UPSTREAM)"
         secret="$(file_value "$file" WEBHOOK_SECRET)"
         database_password="$(file_value "$file" DATABASE_PASSWORD)"
+        volumes="$(file_value "$file" VOLUMES)"
 
         [[ -n "$repo" ]] || fail "$label: REPO is missing"
         [[ -n "$domains" ]] || fail "$label: DOMAINS is missing"
@@ -132,6 +140,17 @@ load_projects() {
             [[ "$domain" != "$SERVER_HOSTNAME" ]] || fail "$label: the server's own hostname cannot be a redirect"
         done
 
+        # Only the volumes' names are given: each one's directory on storage
+        # is always $STORAGE_ROOT/<hostname>/<name>/<volume>. Whether the storage is
+        # mounted is left to deploys, so a missing mount never stops the
+        # rest of the configuration from applying.
+        listed=()
+        for volume in $volumes; do
+            [[ "$volume" =~ $VOLUME_PATTERN ]] || fail "$label: '$volume' in VOLUMES is not a valid Compose volume name"
+            [[ -z "${listed[$volume]:-}" ]] || fail "$label: $volume is listed twice in VOLUMES"
+            listed[$volume]=1
+        done
+
         PROJECTS+=("$name")
         P_BRANCH[$name]="$branch"
         P_DOMAINS[$name]="$domains"
@@ -144,6 +163,7 @@ load_projects() {
         # with '_' rather than '-' as database.sh does
         P_DATABASE[$name]=""
         [[ -z "$database_password" ]] || P_DATABASE[$name]="${name//-/_}"
+        P_VOLUMES[$name]="$(echo "$volumes" | xargs)"
     done
     shopt -u nullglob
 }
@@ -275,6 +295,18 @@ running() {
     command -v docker > /dev/null && [[ -n "$(docker ps --quiet --filter "name=^$1\$" 2> /dev/null)" ]]
 }
 
+# Prints what deploys of projects with VOLUMES would find wrong with the
+# storage, or nothing if it is ready
+storage_problem() {
+    local dir="$STORAGE_ROOT/$SERVER_HOSTNAME"
+
+    if ! findmnt --noheadings --mountpoint "$STORAGE_ROOT" > /dev/null 2>&1; then
+        echo "Nothing is mounted at $STORAGE_ROOT"
+    elif [[ "$(file_value "$dir/$CLAIM_FILE" MACHINE_ID)" != "$(cat /etc/machine-id 2> /dev/null)" ]]; then
+        echo "$dir is not claimed by this server; run ./storage.sh setup"
+    fi
+}
+
 # Moves the generated Caddy files into place, keeping the previous ones in
 # the given backup directory
 swap_caddy_files() {
@@ -354,7 +386,7 @@ apply_deploy_units() {
 }
 
 print_summary() {
-    local name
+    local name problem
 
     if [[ ${#PROJECTS[@]} -eq 0 ]]; then
         info "No projects in config/; $SERVER_HOSTNAME answers \"OK\""
@@ -370,6 +402,11 @@ print_summary() {
         [[ -z "${P_REDIRECTS[$name]}" ]] || echo "      Redirects: ${P_REDIRECTS[$name]}"
         echo "      Webhook:  https://$SERVER_HOSTNAME/hooks/$name"
         [[ -z "${P_DATABASE[$name]}" ]] || echo "      Database: ${P_DATABASE[$name]} on shared-mariadb"
+        if [[ -n "${P_VOLUMES[$name]}" ]]; then
+            echo "      Storage:  ${P_VOLUMES[$name]} in $STORAGE_ROOT/$SERVER_HOSTNAME/$name"
+            problem="$(storage_problem)"
+            [[ -z "$problem" ]] || echo "                Deploys of $name refuse: $problem"
+        fi
     done
 
     if ! deploys_automatic; then

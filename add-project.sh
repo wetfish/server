@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
 # Adds a project to this server: writes config/<name>.conf with a new
-# webhook secret, sets up the env files its setup.conf asks for, applies the
-# configuration, deploys the project, and prints the webhook to add in
-# GitHub. Run from the clone, as root on a server or as yourself on your own
+# webhook secret and the volumes it keeps on the server's storage, if any,
+# sets up the env files its setup.conf asks for, applies the configuration,
+# deploys the project, and prints the webhook to add in GitHub. Run from the clone, as root on a server or as yourself on your own
 # computer:
 #
 #   ./add-project.sh --name glitch --repo https://github.com/wetfish/glitch.git --domain stage-glitch.wetfish.net
@@ -16,6 +16,12 @@ set -euo pipefail
 NAME_PATTERN='^[a-z][a-z0-9-]*$'
 # A remote repository, or a local path for testing before pushing
 REPO_PATTERN='^(https://|ssh://|git@|/)[^[:space:]]+$'
+VOLUME_PATTERN='^[a-zA-Z0-9][a-zA-Z0-9_.-]*$'
+
+# Where the server's storage is mounted, and the file naming the machine
+# that claimed a server's directory there; see storage.sh
+STORAGE_ROOT="/mnt/virtual"
+CLAIM_FILE=".wetfish-server"
 
 # All work happens in functions called from the last line, so a `git pull`
 # that changes this file cannot affect a run in progress.
@@ -46,10 +52,14 @@ Usage: ./add-project.sh [options]
   --upstream <service:port>
                            The Compose service and port that serve the
                            project, instead of nginx:80
+  --storage <volume>       Keep this Compose volume's files on the server's
+                           storage, in $STORAGE_ROOT/<hostname>/<name>/<volume>;
+                           repeat for more. Needs ./storage.sh setup first.
   -h, --help               Show this help
 
 The name, repository, and domains are asked for if not given. Without a
-terminal to ask on, they are required.
+terminal to ask on, they are required. On a server with storage set up, the
+volumes to keep on it are asked for too, unless --storage is given.
 
 Then the values the project's setup.conf asks for are generated or asked
 for, so a project whose setup.conf asks for any by hand needs a terminal.
@@ -75,6 +85,7 @@ parse_options() {
     REDIRECTS=""
     BRANCH=""
     UPSTREAM=""
+    STORAGE_VOLUMES=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -82,7 +93,7 @@ parse_options() {
                 usage
                 exit 0
                 ;;
-            --name | --repo | --domain | --redirect | --branch | --upstream)
+            --name | --repo | --domain | --redirect | --branch | --upstream | --storage)
                 [[ $# -ge 2 ]] || fail "$1 needs a value"
                 set_option "$1" "$2"
                 shift 2
@@ -107,6 +118,7 @@ set_option() {
         --redirect) REDIRECTS+="${REDIRECTS:+ }$2" ;;
         --branch) BRANCH="$2" ;;
         --upstream) UPSTREAM="$2" ;;
+        --storage) STORAGE_VOLUMES+="${STORAGE_VOLUMES:+ }$2" ;;
         *)
             usage >&2
             fail "unknown option: $1"
@@ -155,6 +167,36 @@ choose_settings() {
     fi
 
     [[ -n "$DOMAINS" ]] || fail "a project needs at least one domain"
+
+    choose_storage "$interactive"
+}
+
+# Succeeds if the storage is mounted and this server's directory on it is
+# claimed by this machine, as storage.sh setup leaves it
+storage_ready() {
+    findmnt --noheadings --mountpoint "$STORAGE_ROOT" > /dev/null 2>&1 \
+        && [[ "$(file_value "$STORAGE_ROOT/$SERVER_HOSTNAME/$CLAIM_FILE" MACHINE_ID)" == "$(cat /etc/machine-id 2> /dev/null)" ]]
+}
+
+# Chooses the volumes the project keeps on the server's storage: those given
+# with --storage, or, on a server with storage set up, those asked for
+choose_storage() {
+    local interactive="$1" volume
+    local -A listed=()
+
+    if [[ -n "$STORAGE_VOLUMES" ]]; then
+        storage_ready || fail "storage is not set up on this server for --storage; run ./storage.sh setup first"
+    elif $interactive && storage_ready; then
+        STORAGE_VOLUMES="$(ask "Compose volumes to keep on this server's storage, such as uploads, separated by spaces (Enter for none)")"
+    fi
+
+    for volume in $STORAGE_VOLUMES; do
+        [[ "$volume" =~ $VOLUME_PATTERN ]] || fail "'$volume' is not a valid Compose volume name"
+        [[ -z "${listed[$volume]:-}" ]] || fail "$volume is listed twice for storage"
+        listed[$volume]=1
+    done
+
+    STORAGE_VOLUMES="$(echo "$STORAGE_VOLUMES" | xargs)"
 }
 
 # Removes what an add that didn't finish wrote, so the server is left as it
@@ -186,6 +228,7 @@ add_project() {
             [[ -z "$REDIRECTS" ]] || echo "REDIRECTS=$REDIRECTS"
             [[ -z "$BRANCH" ]] || echo "BRANCH=$BRANCH"
             [[ -z "$UPSTREAM" ]] || echo "UPSTREAM=$UPSTREAM"
+            [[ -z "$STORAGE_VOLUMES" ]] || echo "VOLUMES=$STORAGE_VOLUMES"
             echo "WEBHOOK_SECRET=$(openssl rand -hex 32)"
         } > "$CONFIG_FILE"
     )
@@ -231,6 +274,13 @@ Point these domains' DNS at this server:
   $DOMAINS${REDIRECTS:+ $REDIRECTS}
 ==============================================================================
 EOF
+
+    if [[ -n "$STORAGE_VOLUMES" ]]; then
+        echo
+        echo "$NAME keeps $STORAGE_VOLUMES in $STORAGE_ROOT/$SERVER_HOSTNAME/$NAME. Make each volume's"
+        echo "directory writable by the user $NAME's containers run as; see \"Storage\""
+        echo "in docs/how-it-works.md."
+    fi
 
     if [[ "$DEPLOYED" != true ]]; then
         echo

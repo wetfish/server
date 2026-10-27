@@ -3,9 +3,9 @@
 # Removes a project from this server: stops its containers, deletes
 # config/<name>.conf and its env files in config/<name>/, and applies the
 # configuration, so Caddy stops serving its domains and its webhook is gone.
-# Its clone in projects/<name>, its Docker volumes, and its database on the
-# shared database are kept. Run from the clone, as root on a server or as
-# yourself on your own computer:
+# Its clone in projects/<name>, its Docker volumes, its files on the server's
+# storage, and its database on the shared database are kept. Run from the
+# clone, as root on a server or as yourself on your own computer:
 #
 #   ./remove-project.sh glitch
 #   ./remove-project.sh glitch --yes    # without asking to confirm
@@ -45,7 +45,7 @@ main() {
 
     [[ -n "$name" ]] || usage
 
-    local install_dir config_file reply uses_database=false
+    local install_dir config_file reply uses_database=false uses_storage=false
     install_dir="$(cd "$(dirname "$0")" && pwd)"
     config_file="$install_dir/config/$name.conf"
 
@@ -53,6 +53,10 @@ main() {
 
     if grep -qE '^DATABASE_PASSWORD=.' "$config_file"; then
         uses_database=true
+    fi
+
+    if grep -qE '^VOLUMES=.' "$config_file"; then
+        uses_storage=true
     fi
 
     if ! $confirmed; then
@@ -86,6 +90,17 @@ main() {
     if [[ -d "$install_dir/projects/$name" ]]; then
         echo "Its clone in projects/$name and its Docker volumes are kept; delete them if"
         echo "nothing in them is needed."
+    fi
+
+    if $uses_storage; then
+        echo
+        local hostname
+        hostname="$({ grep -E '^SERVER_HOSTNAME=' "$install_dir/.env" || true; } | tail -n 1 | cut -d '=' -f 2-)"
+        echo "Its files on the server's storage, in /mnt/virtual/$hostname/$name, are"
+        echo "kept too, along with the Docker volumes that bind them. Delete them if"
+        echo "nothing in them is needed:"
+        echo
+        echo "  docker volume ls --filter label=org.wetfish.server.project=$name"
     fi
 
     if $uses_database; then
