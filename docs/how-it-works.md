@@ -164,14 +164,14 @@ The webhook answers:
 
 ### Maintenance Pages
 
-When a project can't be reached, or its web service answers 502 or 504 (such as nginx finding its PHP container unreachable), Caddy shows a maintenance page instead of a bare error. Requests are never held or retried, so no visitor uses a site whose containers are being replaced, for example while a starting container runs migrations. The page keeps the error's status code, is sent with `Retry-After: 30` and `Cache-Control: no-store`, and reloads itself. Other errors, such as a 500 from a bug or a 503 from the application itself, pass through unchanged.
+When a project can't be reached, or its web service answers 502 or 504 (such as nginx finding its PHP container unreachable), Caddy shows a maintenance page instead of a bare error. Requests are never held or retried, so no visitor uses a site whose containers are being replaced, for example while a starting container runs migrations. The page is sent with status 503, `Retry-After: 30`, and `Cache-Control: no-store`, and reloads itself. 503 is the status for temporary unavailability, and Cloudflare shows it to visitors, while it replaces a 502 or 504 with its own error page. Other errors, such as a 500 from a bug or a 503 from the application itself, pass through unchanged.
 
 | Page | Shown |
 |------|-------|
 | `updating.html` | While a [deploy](#deploys) replaces the project's containers and waits for them to be ready |
 | `unavailable.html` | At any other time |
 
-The shared pages are in `caddy/pages/`. A project can show its own instead by adding `maintenance/updating.html`, `maintenance/unavailable.html`, or both to its repository; each deploy copies them from the deployed commit into `generated/maintenance/<name>/`, and a page the project doesn't have falls back to the shared one. A page must be self-contained, with its styles and images inline, since nothing else can be loaded while the site is down.
+The shared pages are in `caddy/pages/`, with the Wetfish logo and the colors of wetfish.net. A project can show its own instead by adding `maintenance/updating.html`, `maintenance/unavailable.html`, or both to its repository; each deploy copies them from the deployed commit into `generated/maintenance/<name>/`, and a page the project doesn't have falls back to the shared one. A page must be self-contained, with its styles and images inline, since nothing else can be loaded while the site is down.
 
 ### Databases
 
