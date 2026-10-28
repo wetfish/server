@@ -226,8 +226,9 @@ read_setup() {
                 [[ -z "$arg" ]] || fail "$label: $kind takes nothing after it"
                 ;;
             random)
-                [[ "$arg" =~ ^(hex|base64)\ +([1-9][0-9]{0,2})$ ]] && ((BASH_REMATCH[2] >= 8 && BASH_REMATCH[2] <= 256)) \
-                    || fail "$label: expected random hex <bytes> or random base64 <bytes>, with 8 to 256 bytes"
+                [[ "$arg" == laravel-key ]] \
+                    || { [[ "$arg" =~ ^(hex|base64)\ +([1-9][0-9]{0,2})$ ]] && ((BASH_REMATCH[2] >= 8 && BASH_REMATCH[2] <= 256)); } \
+                    || fail "$label: expected random hex <bytes> or random base64 <bytes>, with 8 to 256 bytes, or random laravel-key"
                 ;;
             ask | secret)
                 # Shown on the terminal, so only printable characters
@@ -272,15 +273,19 @@ derived_value() {
     esac
 }
 
+# A random secret from OpenSSL's cryptographically secure generator: hex or
+# base64 of the given number of bytes, or a Laravel APP_KEY, which is
+# "base64:" and 32 bytes in base64, as `php artisan key:generate` writes it
+# for Laravel's default cipher, AES-256-CBC
 random_value() {
     local format bytes
     read -r format bytes <<< "$1"
 
-    if [[ "$format" == hex ]]; then
-        openssl rand -hex "$bytes"
-    else
-        openssl rand -base64 "$bytes" | tr -d '\n'
-    fi
+    case "$format" in
+        hex) openssl rand -hex "$bytes" ;;
+        base64) openssl rand -base64 "$bytes" | tr -d '\n' ;;
+        laravel-key) echo "base64:$(openssl rand -base64 32 | tr -d '\n')" ;;
+    esac
 }
 
 # Works out every value before writing anything, so stopping partway, such
@@ -308,7 +313,10 @@ plan_values() {
                 ;;
         esac
 
-        if has_key "$stored" "${E_KEY[$i]}"; then
+        # A generated secret is never empty, so an empty one, such as the
+        # APP_KEY= that Laravel's .env.example holds, is generated
+        if has_key "$stored" "${E_KEY[$i]}" \
+            && [[ "$kind" != random || -n "$(file_value "$stored" "${E_KEY[$i]}")" ]]; then
             continue
         fi
 

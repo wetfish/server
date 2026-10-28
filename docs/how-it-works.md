@@ -89,7 +89,7 @@ php.env DB_DATABASE    database name
 php.env DB_USERNAME    database user
 php.env DB_PASSWORD    database password
 php.env SITE_URL       domain
-php.env APP_KEY        random base64 32
+php.env SESSION_KEY    random base64 32
 php.env SMTP_HOST      ask SMTP server
 php.env SMTP_PASSWORD  secret SMTP password
 
@@ -102,16 +102,17 @@ schema schema.sql
 | `database host`, `port`, `name`, `user`, `password` | The project's database on the [shared database](#databases): `shared-mariadb`, `3306`, its database name, which is also its user, and its password. Any of these gives the project a database, adding a `DATABASE_PASSWORD` to its config file. |
 | `domain`, `url` | The project's first domain, such as `glitch.wetfish.net`, or its `https://` URL |
 | `random hex <bytes>`, `random base64 <bytes>` | A random secret of 8 to 256 bytes, as hex or base64 |
+| `random laravel-key` | A Laravel `APP_KEY`: `base64:` and 32 random bytes in base64, as `php artisan key:generate` writes it (see [Laravel Projects](#laravel-projects)) |
 | `ask <text>` | A value asked for with the text, offering the value in the env file's example as the default |
 | `secret <text>` | A value asked for with the text, without showing what is typed. It can be left empty. |
 
 A `schema <file>` line names a SQL file in the repository that creates the project's tables. It runs once, when a deploy first creates the project's [database](#databases), and never again, so changes to it later don't reach an existing database. It also gives the project a database. To start a project's local database the same way, mount the file into the database image's `/docker-entrypoint-initdb.d/` in `docker-compose.override.yml`, which runs it only while the database is empty.
 
-Each env file starts as a copy of the repository's `<file>.example`, such as `php.env.example`, if it has one, so settings that need no server value keep their example values. Env files must not be tracked in the repository, and values cannot contain a single quote. Values that aren't plain letters, numbers, and punctuation such as `.@:/+=-` are written in single quotes, which Compose reads literally.
+Random values come from OpenSSL's cryptographically secure generator. Each env file starts as a copy of the repository's `<file>.example`, such as `php.env.example`, if it has one, so settings that need no server value keep their example values. Env files must not be tracked in the repository, and values cannot contain a single quote. Values that aren't plain letters, numbers, and punctuation such as `.@:/+=-` are written in single quotes, which Compose reads literally.
 
 The files are kept in `config/<name>/`, readable only by their owner, so moving to a new server with a copy of `config/` brings them along. Each deploy copies them into the project's clone, where its Compose file reads them, and never through a symbolic link in the repository or over a tracked file.
 
-Values already in a file are kept, except those filled in from the server's settings, which every deploy writes again, so changing a project's domains or database password and deploying updates them. To change another value, edit the file in `config/<name>/` and deploy again. When a newer `setup.conf` asks for a value that can be generated, the next deploy adds it. One that has to be entered by hand stops the deploy, with the old containers still running, until it is entered:
+Values already in a file are kept, except those filled in from the server's settings, which every deploy writes again, so changing a project's domains or database password and deploying updates them. A `random` value is never empty, so one left empty, such as the `APP_KEY=` in Laravel's `.env.example`, is generated. To change another value, edit the file in `config/<name>/` and deploy again. When a newer `setup.conf` asks for a value that can be generated, the next deploy adds it. One that has to be entered by hand stops the deploy, with the old containers still running, until it is entered:
 
 ```bash
 ./configure-project.sh glitch
@@ -438,6 +439,86 @@ location ~ \.php$ {
     fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
 }
 ```
+
+### Laravel Projects
+
+A Laravel project follows the same conventions, with a few additions for running from images behind Caddy. The examples assume the Laravel application is at the top of the repository; adjust the paths if it is in a subdirectory.
+
+| Convention | Why |
+|------------|-----|
+| `APP_KEY` from `random laravel-key` in `setup.conf` | Laravel rejects a key without its `base64:` prefix, which `random base64` doesn't write |
+| `.env` mounted read-only into the PHP containers, not read with `env_file` | `.env` is untracked, so deploys allow the mount, and Laravel reads it with its own rules, such as `${APP_NAME}` references, rather than Compose's |
+| Values that are the same on every server, such as `APP_ENV=production`, set under `environment` in `docker-compose.yml`, and their local values in `docker-compose.override.yml` | `setup.conf` only fills in server settings, secrets, and what a person enters; everything else is copied from `.env.example`. Laravel never replaces a real environment variable with a `.env` value, so `environment` wins. |
+| `LOG_CHANNEL=stderr` | Logs reach `docker logs`, under Docker's size cap, rather than a file in the container that is lost with it |
+| `php artisan optimize` when the PHP container starts, not when the image is built | The caches hold the configuration from `.env`, which is only there at run time |
+| Proxies trusted for the scheme, host, and port, but not the visitor's address | Caddy terminates HTTPS, so without `X-Forwarded-Proto` Laravel writes `http://` URLs and browsers block the assets as mixed content. nginx already sets `REMOTE_ADDR` from `X-Real-IP`, so `X-Forwarded-For` isn't needed. Only Caddy can reach nginx, so trusting every address is safe. |
+| Migrations run by a one-off `migrate` service that the PHP service waits for, and seeders that are safe to run on every deploy | Until PHP starts, nginx answers 502 and Caddy shows the updating page, so no visitor reaches a half-migrated site. Deploys count a container that exits with status 0 as done, and fail on any other status. |
+| A web service health check with a `start_period` long enough for migrations | Checks fail while PHP waits for migrations; failures during `start_period` don't count |
+
+**docker-compose.yml for a Laravel project**
+
+```yaml
+x-laravel: &laravel
+  build:
+    context: .
+    dockerfile: Dockerfile.php
+  environment:
+    APP_ENV: production
+    APP_DEBUG: "false"
+    DB_CONNECTION: mariadb
+    LOG_CHANNEL: stderr
+  volumes:
+    - ./.env:/var/www/html/.env:ro
+
+services:
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/up"]
+      interval: 30s
+      start_period: 120s
+      start_interval: 2s
+  php:
+    <<: *laravel
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+  migrate:
+    <<: *laravel
+    command: ["sh", "-c", "php artisan migrate --force && php artisan db:seed --force"]
+    restart: "no"
+```
+
+**setup.conf for a Laravel project**
+
+```text
+.env APP_KEY      random laravel-key
+.env APP_URL      url
+.env DB_HOST      database host
+.env DB_PORT      database port
+.env DB_DATABASE  database name
+.env DB_USERNAME  database user
+.env DB_PASSWORD  database password
+```
+
+**bootstrap/app.php: trusting Caddy for the scheme, host, and port**
+
+```php
+->withMiddleware(function (Middleware $middleware): void {
+    $middleware->trustProxies(
+        at: '*',
+        headers: Request::HEADER_X_FORWARDED_HOST
+            | Request::HEADER_X_FORWARDED_PORT
+            | Request::HEADER_X_FORWARDED_PROTO,
+    );
+})
+```
+
+`Request` is `Illuminate\Http\Request`. Laravel's `/up` route, used by the health check above, is defined in `bootstrap/app.php` by `withRouting(health: '/up')`.
 
 ## Files
 

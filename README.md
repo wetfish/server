@@ -40,7 +40,7 @@ To try it on your own computer first, clone the repository and run `./setup.sh` 
 
 ## Documentation
 
-- [How it works](docs/how-it-works.md): setup, adding and setting up projects, databases, storage, deploys, preparing a project, and files
+- [How it works](docs/how-it-works.md): setup, adding and setting up projects, databases, storage, deploys, preparing a project (including Laravel projects), and files
 - [Cloudflare-only mode](docs/cloudflare.md): accepting web traffic only through Cloudflare
 - [Design decisions](docs/design.md): why it is built this way
 
