@@ -37,7 +37,9 @@
 # Shows a maintenance page instead of a bare 502 or 504 for a project:
 # `import maintenance <project>`, in the project's site block. Requests are
 # never held or retried, so no visitor reaches a site whose containers are
-# being replaced. The page keeps the error's status code.
+# being replaced. The page is sent with status 503, the status for temporary
+# unavailability: Cloudflare shows an origin's 503 to visitors, but replaces a
+# 502 or 504 with its own error page.
 #
 # While deploy.sh replaces the project's containers, it writes
 # generated/maintenance/<project>/deploying, and the page says the site is
@@ -57,12 +59,16 @@
 
 		handle @deploying {
 			try_files /projects/{args[0]}/updating.html /default/updating.html
-			file_server
+			file_server {
+				status 503
+			}
 		}
 
 		handle {
 			try_files /projects/{args[0]}/unavailable.html /default/unavailable.html
-			file_server
+			file_server {
+				status 503
+			}
 		}
 	}
 }
